@@ -1,0 +1,13 @@
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: mindspore-cpu
+spec:
+  resourceSelectors:
+    - apiVersion: batch.volcano.sh/v1alpha1
+      kind: Job
+      name: mindspore-cpu
+  placement:
+    replicaScheduling:
+      replicaDivisionPreference: Aggregated
+      replicaSchedulingType: Divided

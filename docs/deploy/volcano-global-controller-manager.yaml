@@ -1,0 +1,36 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: volcano-global-controller-manager
+  namespace: volcano-global
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: volcano-global-controller-manager
+  template:
+    metadata:
+      labels:
+        app: volcano-global-controller-manager
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: volcano-global-controllers-manager
+          image: volcanosh/volcano-global-controller-manager:1.0
+          args:
+            - --kubeconfig=/etc/kubeconfig
+            - --leader-elect=false
+            - --logtostderr
+            - --enable-healthz=true
+            - -v=5
+            - 2>&1
+          imagePullPolicy: Never
+          volumeMounts:
+            - name: kubeconfig-secret
+              subPath: kubeconfig
+              mountPath: /etc/kubeconfig
+              readOnly: true
+      volumes:
+        - name: kubeconfig-secret
+          secret:
+            secretName: kubeconfig
