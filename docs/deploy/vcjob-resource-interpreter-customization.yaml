@@ -1,0 +1,98 @@
+apiVersion: config.karmada.io/v1alpha1
+kind: ResourceInterpreterCustomization
+metadata:
+  name: vcjob-configuration
+spec:
+  target:
+    apiVersion: batch.volcano.sh/v1alpha1
+    kind: Job
+  customizations:
+    replicaResource:
+      # todo: We can try to return a more precise requirement by using methods such as weighted average,
+      # taking the maximum, and averaging. Currently, we only take the requirement of the first task.
+      luaScript: >
+        local kube = require("kube")
+        function GetReplicas(obj)
+          replica = obj.spec.tasks[1].replicas
+          requirement = kube.accuratePodRequirements(obj.spec.tasks[1].template)
+          return replica, requirement
+        end
+    replicaRevision:
+      luaScript: >
+        function ReviseReplica(obj, desiredReplica)
+          obj.spec.tasks[1].replicas = desiredReplica
+          return obj
+        end
+    retention:
+      luaScript: >
+        function Retain(desiredObj, observedObj)
+          for i = 1, #observedObj.spec.tasks do
+            desiredObj.spec.tasks[i].maxRetry = observedObj.spec.tasks[i].maxRetry
+            desiredObj.spec.tasks[i].minAvailable = observedObj.spec.tasks[i].minAvailable
+          end
+          return desiredObj
+        end
+    healthInterpretation:
+      luaScript: >
+        function InterpretHealth(observedObj)
+          if observedObj == nil or observedObj.status == nil then
+            return false
+          end
+          return observedObj.status.phase == Running
+        end
+    statusReflection:
+      luaScript: >
+        function ReflectStatus (observedObj)
+          status = {}
+          if observedObj == nil or observedObj.status == nil then
+            return status
+          end
+          status.minAvailable = observedObj.status.minAvailable
+          status.running = observedObj.status.running
+          status.taskStatusCount = observedObj.status.taskStatusCount
+          status.state = observedObj.status.state
+          return status
+        end
+    statusAggregation:
+      luaScript: >
+        function AggregateStatus(desiredObj, statusItems)
+          if statusItems == nil then
+            return desiredObj
+          end
+          if desiredObj.status == nil then
+            desiredObj.status = {}
+          end
+          running = 0
+          minAvailable = 0
+          taskStatusCount = {}
+          state = {}
+          for i = 1, #statusItems do
+            if statusItems[i].status ~= nil and statusItems[i].status.running ~= nil then
+              running = running + statusItems[i].status.running
+            end
+            if statusItems[i].status ~= nil and statusItems[i].status.minAvailable ~= nil then
+              minAvailable = statusItems[i].status.minAvailable
+            end
+            if statusItems[i].status ~= nil and statusItems[i].status.state ~= nil then
+              state = statusItems[i].status.state
+            end
+            if statusItems[i].status ~= nil and statusItems[i].status.taskStatusCount ~= nil then
+              for key, value in pairs(statusItems[i].status.taskStatusCount) do
+                if taskStatusCount[key] == nil then
+                   taskStatusCount[key] = { phase = {} }
+                end
+                for k,v in pairs(value.phase) do
+                  if taskStatusCount[key].phase[k] == nil then
+                    taskStatusCount[key].phase[k] = 0
+                  end    
+                  taskStatusCount[key].phase[k] =  taskStatusCount[key].phase[k] + v
+                end
+              end
+            end
+          end
+          desiredObj.status.running = running
+          desiredObj.status.minAvailable = minAvailable
+          desiredObj.status.state = state
+          desiredObj.status.taskStatusCount = taskStatusCount
+          return desiredObj
+        end

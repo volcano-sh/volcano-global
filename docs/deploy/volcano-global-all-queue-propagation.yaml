@@ -1,0 +1,11 @@
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: volcano-global-all-queue-propagation
+spec:
+  resourceSelectors:
+    - apiVersion: scheduling.volcano.sh/v1beta1
+      kind: Queue
+  placement:
+    replicaScheduling:
+      replicaSchedulingType: Duplicated

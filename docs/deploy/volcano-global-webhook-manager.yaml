@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: volcano-global-webhook-manager
+  name: volcano-global-webhook-manager
+  namespace: volcano-global
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: volcano-global-webhook-manager
+  template:
+    metadata:
+      labels:
+        app: volcano-global-webhook-manager
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: volcano-global-webhook-manager
+          args:
+            - --kubeconfig=/etc/kubeconfig
+            - --enabled-admission=/resourcebindings/mutate
+            - --tls-cert-file=/admission.local.config/certificates/tls.crt
+            - --tls-private-key-file=/admission.local.config/certificates/tls.key
+            - --ca-cert-file=/admission.local.config/certificates/ca.crt
+            - --webhook-service-name=volcano-global-webhook
+            - --webhook-namespace=volcano-global
+            - --logtostderr
+            - --enable-healthz=true
+            - --port=8443
+            - -v=5
+            - 2>&1
+          image: volcanosh/volcano-global-webhook-manager:1.0
+          imagePullPolicy: Never
+          volumeMounts:
+            - mountPath: /admission.local.config/certificates
+              name: admission-certs
+              readOnly: true
+            - name: kubeconfig-secret
+              subPath: kubeconfig
+              mountPath: /etc/kubeconfig
+              readOnly: true
+      volumes:
+        - name: kubeconfig-secret
+          secret:
+            secretName: kubeconfig
+        - name: admission-certs
+          secret:
+            secretName: volcano-global-webhook-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: volcano-global-webhook
+  namespace: volcano-global
+  labels:
+    app: volcano-global-webhook-manager
+spec:
+  ports:
+    - port: 443
+      protocol: TCP
+      targetPort: 8443
+  selector:
+    app: volcano-global-webhook-manager
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: volcano-global-admission-init
+  namespace: volcano-global
+  labels:
+    app: volcano-global-admission-init
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      serviceAccountName: volcano-global-webhook-init-sa
+      restartPolicy: Never
+      containers:
+        - name: main
+          image: volcanosh/volcano-global-webhook-manager:1.0
+          imagePullPolicy: Never
+          command: ["./gen-admission-secret.sh", "--service", "volcano-global-webhook", "--namespace",
+                    "volcano-global", "--secret", "volcano-global-webhook-cert"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: volcano-global-webhook-init-sa
+  namespace: volcano-global
+  labels:
+    app: volcano-global-admission-init
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: volcano-global-webhook-init-clusterrole
+  labels:
+    app: volcano-global-admission-init
+rules:
+  - apiGroups: [ "" ]
+    resources: [ "secrets" ]
+    verbs: [ "create", "list" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: volcano-global-webhook-init-clusterrolebinding
+  labels:
+    app: volcano-global-admission-init
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: volcano-global-webhook-init-clusterrole
+subjects:
+  - kind: ServiceAccount
+    name: volcano-global-webhook-init-sa
+    namespace: volcano-global

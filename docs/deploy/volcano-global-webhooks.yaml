@@ -1,0 +1,21 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: volcano-admission-service-resourcebindings-mutate
+webhooks:
+  - name: mutateresourcebindings.volcano.sh
+    admissionReviewVersions:
+      - v1
+    clientConfig:
+      url: https://volcano-global-webhook.volcano-global.svc:443/resourcebindings/mutate
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    reinvocationPolicy: Never
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: ["work.karmada.io"]
+        apiVersions: ["v1alpha2"]
+        resources: ["resourcebindings"]
+        scope: "Namespaced"
+    sideEffects: None
+    timeoutSeconds: 3
