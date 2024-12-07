@@ -50,7 +50,7 @@ You can install `Volcano` to all member cluster like:
 
 ```bash
 # Switch to the member clusters, you need install the Volcano to the all member cluster.
-export KUBECONFIG=/Users/vacant/.kube/members.config
+export KUBECONFIG=$HOME/.kube/members.config
 
 # Deploy Volcano to the member clusters.
 kubectl --context member1 apply -f https://raw.githubusercontent.com/volcano-sh/volcano/release-1.10/installer/volcano-development.yaml
@@ -67,11 +67,11 @@ we need a plugin to share the target secret with the `volcano-global` namespace.
 
 ```bash
 # Switch to Karmada host kubeconfig.
-export KUBECONFIG=/Users/vacant/.kube/karmada.config
+export KUBECONFIG=$HOME/.kube/karmada.config
 
-# Deploy the Kubernetes Reflector and share the kubeconfig from karmada-system namespace.
+# Deploy the Kubernetes Reflector and share the karmada-webhook-config secret from karmada-system namespace, it includes the kubeconfig of Karmada control plane.
 kubectl --context karmada-host -n kube-system apply -f https://github.com/emberstack/kubernetes-reflector/releases/download/v7.1.262/reflector.yaml
-kubectl --context karmada-host annotate secret kubeconfig \
+kubectl --context karmada-host annotate secret karmada-webhook-config \
   reflector.v1.k8s.emberstack.com/reflection-allowed="true" \
   reflector.v1.k8s.emberstack.com/reflection-auto-namespaces="volcano-global" \
   reflector.v1.k8s.emberstack.com/reflection-auto-enabled="true" \
@@ -96,7 +96,7 @@ You need to run these commands on `docs/deploy` direction.
 
 ```bash
 # Switch to Karmada host kubeconfig.
-export KUBECONFIG=/Users/vacant/.kube/karmada.config
+export KUBECONFIG=$HOME/.kube/karmada.config
 
 # Apply the component deployment yaml.
 kubectl --context karmada-host apply -f volcano-global-namespace.yaml
@@ -111,7 +111,7 @@ kubectl --context karmada-apiserver apply -f volcano-global-webhooks.yaml
 
 ```bash
 # Switch to Karmada host kubeconfig.
-export KUBECONFIG=/Users/vacant/.kube/karmada.config
+export KUBECONFIG=$HOME/.kube/karmada.config
 
 # Update the karmada scheduler image.
 kubectl --context karmada-host set image deployment/karmada-scheduler \
@@ -132,7 +132,7 @@ Required `Volcano` CRD List:
 
 ```bash
 # Switch to Karmada host kubeconfig.
-export KUBECONFIG=/Users/vacant/.kube/karmada.config
+export KUBECONFIG=$HOME/.kube/karmada.config
 
 # Apply the required CRD to Karmada control plane.
 kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volcano/raw/release-1.10/installer/helm/chart/volcano/crd/bases/batch.volcano.sh_jobs.yaml
@@ -150,7 +150,7 @@ You need to run these commands on `docs/deploy` direction.
 
 ```bash
 # Switch to Karmada host kubeconfig.
-export KUBECONFIG=/Users/vacant/.kube/karmada.config
+export KUBECONFIG=$HOME/.kube/karmada.config
 
 # Apply the volcano job resource interpreter customization configuration.
 kubectl --context karmada-apiserver apply -f vcjob-resource-interpreter-customization.yaml
@@ -170,7 +170,7 @@ to prevent unintended consequences due to accidental deletion.
 
 ```bash
 # Switch to Karmada host kubeconfig.
-export KUBECONFIG=/Users/vacant/.kube/karmada.config
+export KUBECONFIG=$HOME/.kube/karmada.config
 
 # Apply the volcano job resource interpreter customization configuration.
 kubectl --context karmada-apiserver apply -f volcano-global-all-queue-propagation.yaml
@@ -185,7 +185,7 @@ You need to run these commands on `docs/deploy` direction.
 
 ```bash
 # Switch to Karmada host kubeconfig.
-export KUBECONFIG=/Users/vacant/.kube/karmada.config
+export KUBECONFIG=$HOME/.kube/karmada.config
 
 # Apply the example job, try to care the status of member clusters.
 kubectl --context karmada-apiserver apply -f exmaple/.

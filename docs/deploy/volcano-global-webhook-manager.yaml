@@ -19,7 +19,7 @@ spec:
       containers:
         - name: volcano-global-webhook-manager
           args:
-            - --kubeconfig=/etc/kubeconfig
+            - --kubeconfig=/etc/kubeconfig/karmada.config
             - --enabled-admission=/resourcebindings/mutate
             - --tls-cert-file=/admission.local.config/certificates/tls.crt
             - --tls-private-key-file=/admission.local.config/certificates/tls.key
@@ -37,14 +37,13 @@ spec:
             - mountPath: /admission.local.config/certificates
               name: admission-certs
               readOnly: true
-            - name: kubeconfig-secret
-              subPath: kubeconfig
+            - name: webhook-config
               mountPath: /etc/kubeconfig
               readOnly: true
       volumes:
-        - name: kubeconfig-secret
+        - name: webhook-config
           secret:
-            secretName: kubeconfig
+            secretName: karmada-webhook-config
         - name: admission-certs
           secret:
             secretName: volcano-global-webhook-cert

@@ -1,4 +1,5 @@
 # Volcano Global
+
 Multi Cluster scheduler, designed to efficiently manage and schedule AI/ML, Bigdata workloads across multiple Kubernetes clusters.
 
 # volcano-global
@@ -13,7 +14,7 @@ This project originated from:
 
 # Quick start
 
-You can read [deploy guide](docs/deploy/README).
+You can read [deploy guide](docs/deploy/README.md).
 
 # How does it run?
 

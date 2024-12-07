@@ -18,7 +18,7 @@ spec:
         - name: volcano-global-controllers-manager
           image: volcanosh/volcano-global-controller-manager:1.0
           args:
-            - --kubeconfig=/etc/kubeconfig
+            - --kubeconfig=/etc/kubeconfig/karmada.config
             - --leader-elect=false
             - --logtostderr
             - --enable-healthz=true
@@ -26,11 +26,10 @@ spec:
             - 2>&1
           imagePullPolicy: Never
           volumeMounts:
-            - name: kubeconfig-secret
-              subPath: kubeconfig
+            - name: webhook-config
               mountPath: /etc/kubeconfig
               readOnly: true
       volumes:
-        - name: kubeconfig-secret
+        - name: webhook-config
           secret:
-            secretName: kubeconfig
+            secretName: karmada-webhook-config
