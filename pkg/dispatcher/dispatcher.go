@@ -86,7 +86,8 @@ func (dispatcher *Dispatcher) Run(stopCh <-chan struct{}) {
 	dispatcher.cache.Run(stopCh)
 
 	go wait.Until(dispatcher.runOnce, dispatcher.dispatchPeriod, stopCh)
-	klog.V(2).Infof("Dispatcher completes initialization and start to run, period <%v> seconds...", dispatcher.dispatchPeriod.Seconds())
+	klog.V(2).Infof("Dispatcher initialization complete. Starting to run with a period of %v seconds...",
+		dispatcher.dispatchPeriod.Seconds())
 }
 
 func (dispatcher *Dispatcher) runOnce() {
@@ -94,8 +95,9 @@ func (dispatcher *Dispatcher) runOnce() {
 	defer klog.V(4).Infof("End dispatching...")
 
 	ssn := dispatcherframework.OpenSession(dispatcher.cache)
+	defer ssn.CloseSession()
+
 	dispatcher.dispatch(ssn)
-	ssn.CloseSession()
 }
 
 // Dispatch is the main behavior of the Dispatcher.
@@ -104,8 +106,8 @@ func (dispatcher *Dispatcher) runOnce() {
 // If each RB meets certain conditions, it will be placed in the queue
 // and subsequently updated with their Suspend set to false.
 func (dispatcher *Dispatcher) dispatch(ssn *dispatcherframework.Session) {
-	klog.V(5).Infof("Dispatcher start running...")
-	defer klog.V(5).Infof("Dispatcher end running...")
+	klog.V(5).Infof("Dispatcher started running...")
+	defer klog.V(5).Infof("Dispatcher finished running...")
 
 	ss := ssn.Snapshot
 	queues := util.NewPriorityQueue(ssn.QueueInfoOrderFn)
@@ -131,11 +133,12 @@ func (dispatcher *Dispatcher) dispatch(ssn *dispatcherframework.Session) {
 		if rbiPriorityQueue, found := resourceBindingMap[rbiQueueName]; found {
 			// Add this workload to the queue.
 			rbiPriorityQueue.Push(rbi)
+			enqueueResourceBindingCount++
 		} else {
 			// This queue didn't set in the map, we should check if the queue exists first, then add it to the map.
 			if queue, found := ss.QueueInfos[rbiQueueName]; found {
-				klog.V(5).Infof("Added Queue <%s> for ResourceBinding <%s/%s>.",
-					rbiQueueName, rb.Namespace, rb.Name)
+				klog.V(5).Infof("Added ResourceBinding <%s/%s> into Queue <%s>.",
+					rb.Namespace, rb.Name, rbiQueueName)
 				// Create the priority queue for ResourceBindings, and push it.
 				resourceBindingMap[rbiQueueName] = util.NewPriorityQueue(ssn.ResourceBindingInfoOrderFn)
 				resourceBindingMap[rbiQueueName].Push(rbi)
@@ -143,38 +146,57 @@ func (dispatcher *Dispatcher) dispatch(ssn *dispatcherframework.Session) {
 				queues.Push(queue)
 				enqueueResourceBindingCount++
 			} else {
-				// We cant find this queue in the cache snapshot, skip it.
-				klog.V(3).Infof("Resource %s <%s/%s> Queue <%s> not found, skip dispatching.",
-					resource.Kind, resource.Namespace, resource.Name, rbiQueueName)
+				// We can't find this queue in the cache snapshot, skipping it.
+				klog.V(3).Infof("Queue <%s> for Resource %s <%s/%s> not found in cache snapshot, skipping dispatch.",
+					rbiQueueName, resource.Kind, resource.Namespace, resource.Name)
 				continue
 			}
 		}
 	}
 
-	klog.V(5).Infof("Success enqueue <%d> ResourceBindingInfos and <%d> Queues, start dispatching now...",
+	klog.V(5).Infof("Successfully enqueued %d ResourceBindingInfos and %d Queues. Starting dispatch now...",
 		enqueueResourceBindingCount, len(resourceBindingMap))
 
+	// Sort the queues by priority
+	roundedQueues := util.NewPriorityQueue(ssn.QueueInfoOrderFn)
+
+	// Round-robin dispatch the ResourceBindingInfos in the queues.
+	// TODO: We will add capacity-based dispatching in the next major release.
 	for {
-		// Finish dispatching when all the queues dispatch done.
 		if queues.Empty() {
-			break
+
+			if roundedQueues.Empty() {
+				// Finish dispatching when all the queues dispatch done.
+				break
+			} else {
+				// Swap queues and roundedQueues
+				queues, roundedQueues = roundedQueues, queues
+			}
 		}
 
 		queue := queues.Pop().(*schedulingapi.QueueInfo)
-		resourceBindingsQueue := resourceBindingMap[queue.Name]
 
-		// Get all the ResourceBindingInfos from the priority queue.
-		for !resourceBindingsQueue.Empty() {
-			rbi := resourceBindingsQueue.Pop().(*api.ResourceBindingInfo)
+		resourceBindings, found := resourceBindingMap[queue.Name]
+		if !found || resourceBindings.Empty() {
+			// This queue has no ResourceBinding, skip it.
+			continue
+		}
 
-			rbi.DispatchStatus = api.UnSuspending
-			dispatcher.cache.UnSuspendResourceBinding(types.NamespacedName{
-				Namespace: rbi.ResourceBinding.Namespace,
-				Name:      rbi.ResourceBinding.Name,
-			})
-			dispatchResourceBindingCount++
+		// Get the highest priority ResourceBinding from the queue.
+		rbi := resourceBindings.Pop().(*api.ResourceBindingInfo)
+
+		rbi.DispatchStatus = api.UnSuspending
+		dispatcher.cache.UnSuspendResourceBinding(types.NamespacedName{
+			Namespace: rbi.ResourceBinding.Namespace,
+			Name:      rbi.ResourceBinding.Name,
+		})
+		dispatchResourceBindingCount++
+
+		// Add the queue to roundedQueues if it still has ResourceBinding.
+		if !resourceBindings.Empty() {
+			roundedQueues.Push(queue)
 		}
 	}
 
-	klog.V(2).Infof("Success dispatch <%d> ResourceBindingInfos.", dispatchResourceBindingCount)
+	klog.V(2).Infof("Successfully dispatched %d ResourceBindingInfos.", dispatchResourceBindingCount)
 }
