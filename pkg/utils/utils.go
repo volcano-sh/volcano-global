@@ -15,7 +15,3 @@ limitations under the License.
 */
 
 package utils
-
-func ToPointer[T any](c T) *T {
-	return &c
-}

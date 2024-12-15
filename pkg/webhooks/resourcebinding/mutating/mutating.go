@@ -25,6 +25,7 @@ import (
 	registrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 	"volcano.sh/volcano/pkg/webhooks/router"
 	"volcano.sh/volcano/pkg/webhooks/util"
 
@@ -97,6 +98,6 @@ func ResourceBindings(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResp
 		return util.ToAdmissionResponse(err)
 	}
 
-	response.PatchType = utils.ToPointer(admissionv1.PatchTypeJSONPatch)
+	response.PatchType = ptr.To(admissionv1.PatchTypeJSONPatch)
 	return response
 }
