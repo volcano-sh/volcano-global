@@ -19,14 +19,22 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
 	"gomodules.xyz/jsonpatch/v2"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
 	"volcano.sh/volcano-global/pkg/dispatcher/api"
+)
+
+// Reasons for resourceBinding events.
+const (
+	// FailedUnSuspendReason is added in an event when failed to unsuspend a ResourceBinding.
+	FailedUnSuspendReason = "FailedUnSuspend"
 )
 
 func (dc *DispatcherCache) UnSuspendResourceBinding(key types.NamespacedName) {
@@ -84,6 +92,8 @@ func (dc *DispatcherCache) unSuspendResourceBinding(rb *workv1alpha2.ResourceBin
 			klog.Errorf("ResourceBindingInfo <%s/%s> not found in cache.", key.Namespace, key.Name)
 		} else {
 			// Recover the ResourceBindingInfo status to Suspended, wait for the next dispatch.
+			dc.recorder.Event(rbi.ResourceBinding, v1.EventTypeWarning, FailedUnSuspendReason,
+				fmt.Sprintf("Error unsuspending ResourceBinding: %+v", err))
 			rbi.DispatchStatus = api.Suspended
 		}
 		dc.mutex.Unlock()

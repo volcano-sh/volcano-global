@@ -24,14 +24,18 @@ import (
 	karmadaclientset "github.com/karmada-io/karmada/pkg/generated/clientset/versioned"
 	karmadainformerfactory "github.com/karmada-io/karmada/pkg/generated/informers/externalversions"
 	informerworkv1aplha2 "github.com/karmada-io/karmada/pkg/generated/informers/externalversions/work/v1alpha2"
+	v1 "k8s.io/api/core/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	schedv1 "k8s.io/client-go/informers/scheduling/v1"
 	"k8s.io/client-go/kubernetes"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	"volcano.sh/apis/pkg/apis/scheduling/scheme"
 	schedulingv1beta1 "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
 	volcanoclientset "volcano.sh/apis/pkg/client/clientset/versioned"
 	volcanoinformer "volcano.sh/apis/pkg/client/informers/externalversions"
@@ -46,6 +50,7 @@ import (
 
 type DispatcherCacheOption struct {
 	WorkerNum         uint32
+	DispatcherName    string
 	DefaultQueueName  string
 	KubeClientOptions kube.ClientOptions
 }
@@ -53,6 +58,9 @@ type DispatcherCacheOption struct {
 type DispatcherCache struct {
 	mutex     sync.Mutex
 	workerNum uint32
+
+	// dispatcherName is the name for volcano dispatcher
+	dispatcherName string
 
 	kubeClient    kubernetes.Interface
 	vcClient      volcanoclientset.Interface
@@ -86,6 +94,9 @@ type DispatcherCache struct {
 	// Its queue for unsuspend the ResourceBinding, when a ResourceBinding finish dispatch,
 	// The Dispatcher will add a task to here, and update the ResourceBinding.spec.Suspend = false.
 	unSuspendRBTaskQueue workqueue.Interface
+
+	// ResourceBinding event recorder
+	recorder record.EventRecorder
 }
 
 func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface {
@@ -105,11 +116,17 @@ func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface 
 	if err != nil {
 		panic(fmt.Sprintf("failed to init karmadaClient, with err: %v", err))
 	}
+	eventClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		panic(fmt.Sprintf("failed to init eventClient, with err: %v", err))
+	}
 
 	// Create the default queue
 	utils.CreateDefaultQueue(volcanoClient, option.DefaultQueueName)
 
-	sc := &DispatcherCache{
+	dc := &DispatcherCache{
+		dispatcherName: option.DispatcherName,
+
 		kubeClient:    kubeClient,
 		workerNum:     option.WorkerNum,
 		vcClient:      volcanoClient,
@@ -130,35 +147,40 @@ func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface 
 		unSuspendRBTaskQueue: workqueue.New(),
 	}
 
-	sc.queueInformer = sc.volcanoInformerFactory.Scheduling().V1beta1().Queues()
-	sc.queueInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    sc.addQueue,
-		UpdateFunc: sc.updateQueue,
-		DeleteFunc: sc.deleteQueue,
+	dc.queueInformer = dc.volcanoInformerFactory.Scheduling().V1beta1().Queues()
+	dc.queueInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    dc.addQueue,
+		UpdateFunc: dc.updateQueue,
+		DeleteFunc: dc.deleteQueue,
 	})
 
-	sc.podGroupInformer = sc.volcanoInformerFactory.Scheduling().V1beta1().PodGroups()
-	sc.podGroupInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    sc.addPodGroup,
-		UpdateFunc: sc.updatePodGroup,
-		DeleteFunc: sc.deletePodGroup,
+	dc.podGroupInformer = dc.volcanoInformerFactory.Scheduling().V1beta1().PodGroups()
+	dc.podGroupInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    dc.addPodGroup,
+		UpdateFunc: dc.updatePodGroup,
+		DeleteFunc: dc.deletePodGroup,
 	})
 
-	sc.priorityClassInformer = sc.informerFactory.Scheduling().V1().PriorityClasses()
-	sc.priorityClassInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    sc.addPriorityClass,
-		UpdateFunc: sc.updatePriorityClass,
-		DeleteFunc: sc.deletePriorityClass,
+	dc.priorityClassInformer = dc.informerFactory.Scheduling().V1().PriorityClasses()
+	dc.priorityClassInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    dc.addPriorityClass,
+		UpdateFunc: dc.updatePriorityClass,
+		DeleteFunc: dc.deletePriorityClass,
 	})
 
-	sc.resourceBindingInformer = sc.karmadaInformerFactor.Work().V1alpha2().ResourceBindings()
-	sc.resourceBindingInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    sc.addResourceBinding,
-		UpdateFunc: sc.updateResourceBinding,
-		DeleteFunc: sc.deleteResourceBinding,
+	dc.resourceBindingInformer = dc.karmadaInformerFactor.Work().V1alpha2().ResourceBindings()
+	dc.resourceBindingInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    dc.addResourceBinding,
+		UpdateFunc: dc.updateResourceBinding,
+		DeleteFunc: dc.deleteResourceBinding,
 	})
 
-	return sc
+	// Prepare event clients.
+	broadcaster := record.NewBroadcaster()
+	broadcaster.StartRecordingToSink(&corev1.EventSinkImpl{Interface: eventClient.CoreV1().Events("")})
+	dc.recorder = broadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: option.DispatcherName})
+
+	return dc
 }
 
 func (dc *DispatcherCache) Run(stopCh <-chan struct{}) {

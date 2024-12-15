@@ -28,8 +28,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/utils/ptr"
 
-	"volcano.sh/volcano-global/pkg/utils"
 	"volcano.sh/volcano-global/pkg/webhooks/decoder"
 )
 
@@ -89,7 +89,7 @@ func TestResourceBindings(t *testing.T) {
 			expectResponse: admissionv1.AdmissionResponse{
 				Allowed:   true,
 				Patch:     normalResponsePatch,
-				PatchType: utils.ToPointer(admissionv1.PatchTypeJSONPatch),
+				PatchType: ptr.To(admissionv1.PatchTypeJSONPatch),
 			},
 		},
 		{
