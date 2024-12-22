@@ -14,50 +14,41 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils
+package workload
 
 import (
 	"fmt"
 
 	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	batchv1alpha1 "volcano.sh/apis/pkg/apis/batch/v1alpha1"
 )
 
-// todo: we can do like kueue/pkg/controller/jobframework/interface.go, the workloads implement the interface so that we didnt need to know what kind of the resource.
+type NewWorkloadFunc func(*unstructured.Unstructured) (Workload, error)
 
 // This map contains the workload that we can handle now, the controllers will create PodGroup for them.
-var workloadGVKMap = map[schema.GroupVersionKind]struct{}{
+var workloadGVKMap = map[schema.GroupVersionKind]NewWorkloadFunc{
 	{
 		Group:   batchv1alpha1.SchemeGroupVersion.Group,
 		Version: batchv1alpha1.SchemeGroupVersion.Version,
 		Kind:    "Job",
-	}: {},
-	{
-		Group:   appsv1.SchemeGroupVersion.Group,
-		Version: appsv1.SchemeGroupVersion.Version,
-		Kind:    "Deployment",
-	}: {},
-	{
-		Group:   corev1.SchemeGroupVersion.Group,
-		Version: corev1.SchemeGroupVersion.Version,
-		Kind:    "Pod",
-	}: {},
+	}: NewVolcanoJobWorkload,
 }
 
-// IsWorkload Return if the object reference is a workload.
-func IsWorkload(ref workv1alpha2.ObjectReference) (bool, error) {
+func TryGetNewWorkloadFunc(ref workv1alpha2.ObjectReference) (bool, NewWorkloadFunc, error) {
 	gv, err := schema.ParseGroupVersion(ref.APIVersion)
 	if err != nil {
-		return false, fmt.Errorf("failed to parse APIVersion, err: %v", err)
+		return false, nil, fmt.Errorf("failed to parse APIVersion, err: %v", err)
 	}
 
-	_, exists := workloadGVKMap[schema.GroupVersionKind{
+	retFunc, exists := workloadGVKMap[schema.GroupVersionKind{
 		Group:   gv.Group,
 		Version: gv.Version,
 		Kind:    ref.Kind,
 	}]
-	return exists, nil
+	if !exists {
+		return false, nil, nil
+	}
+	return true, retFunc, nil
 }

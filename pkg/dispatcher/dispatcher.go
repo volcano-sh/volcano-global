@@ -35,7 +35,9 @@ import (
 )
 
 func init() {
-	framework.RegisterController(&Dispatcher{})
+	if err := framework.RegisterController(&Dispatcher{}); err != nil {
+		panic(fmt.Sprintf("failed to register dispatcher controller: %v", err))
+	}
 }
 
 const (
@@ -99,7 +101,7 @@ func (dispatcher *Dispatcher) runOnce() {
 // Dispatch is the main behavior of the Dispatcher.
 // Its primary responsibilities are: sorting the queues and the pending RBs (Resource Bundles) within the queues,
 // and then, according to the queue priority, sequentially retrieving all RBs from the queues.
-// If each RB meets certain conditions,it will be placed in the queue
+// If each RB meets certain conditions, it will be placed in the queue
 // and subsequently updated with their Suspend set to false.
 func (dispatcher *Dispatcher) dispatch(ssn *dispatcherframework.Session) {
 	klog.V(5).Infof("Dispatcher start running...")
@@ -113,8 +115,6 @@ func (dispatcher *Dispatcher) dispatch(ssn *dispatcherframework.Session) {
 	dispatchResourceBindingCount := 0
 
 	// Collect the workloads to the queue map.
-	// For now, the `workload` includes Deployment, volcano-job and Pod only.
-	// Because only the three resources will create PodGroup by controllers.
 	for _, rbi := range ss.ResourceBindingInfos {
 		rb := rbi.ResourceBinding
 
@@ -123,15 +123,7 @@ func (dispatcher *Dispatcher) dispatch(ssn *dispatcherframework.Session) {
 			continue
 		}
 
-		// If its workload but without PodGroup, skip it.
-		// Only workload ResourceBinding will be suspend and add to the dispatcher cache.
-		if rbi.PodGroup == nil {
-			klog.Errorf("ResourceBinding <%s/%s> is a workload but has no PodGroup, stop dispatching and enqueue.",
-				rb.Namespace, rb.Name)
-			continue
-		}
-
-		// Get the workload's queue name, it may be a nil.
+		// Get the workload's queue name, it may be nil.
 		rbiQueueName := ssn.GetResourceBindingInfoQueue(rbi)
 		resource := rb.Spec.Resource
 

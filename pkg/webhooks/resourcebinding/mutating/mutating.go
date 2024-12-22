@@ -30,6 +30,7 @@ import (
 
 	"volcano.sh/volcano-global/pkg/utils"
 	"volcano.sh/volcano-global/pkg/webhooks/decoder"
+	"volcano.sh/volcano-global/pkg/workload"
 )
 
 // Init the ResourceBinding mutate admissionWebhook, it will set the `suspend` to true when create a ResourceBinding.
@@ -77,7 +78,7 @@ func ResourceBindings(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResp
 	}
 
 	// Check if its workload, skip suspend if not.
-	isWorkload, err := utils.IsWorkload(rb.Spec.Resource)
+	isWorkload, _, err := workload.TryGetNewWorkloadFunc(rb.Spec.Resource)
 	if err != nil {
 		klog.Errorf("Failed to check ResourceBinding <%s/%s> if workload, stop suspend, err: %v",
 			rb.Namespace, rb.Name, err)

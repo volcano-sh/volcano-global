@@ -25,14 +25,16 @@ import (
 	karmadainformerfactory "github.com/karmada-io/karmada/pkg/generated/informers/externalversions"
 	informerworkv1aplha2 "github.com/karmada-io/karmada/pkg/generated/informers/externalversions/work/v1alpha2"
 	schedulingv1 "k8s.io/api/scheduling/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/informers"
 	schedv1 "k8s.io/client-go/informers/scheduling/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
-	schedulingv1beta1 "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
 	volcanoclientset "volcano.sh/apis/pkg/client/clientset/versioned"
 	volcanoinformer "volcano.sh/apis/pkg/client/informers/externalversions"
 	volcanoinformerfactory "volcano.sh/apis/pkg/client/informers/externalversions"
@@ -55,8 +57,10 @@ type DispatcherCache struct {
 	workerNum uint32
 
 	kubeClient    kubernetes.Interface
+	dynamicClient dynamic.Interface
 	vcClient      volcanoclientset.Interface
 	karmadaClient karmadaclientset.Interface
+	restMapper    meta.RESTMapper
 
 	informerFactory        informers.SharedInformerFactory
 	volcanoInformerFactory volcanoinformer.SharedInformerFactory
@@ -66,10 +70,6 @@ type DispatcherCache struct {
 	queues        map[string]*schedulingapi.QueueInfo
 	defaultQueue  string
 
-	podGroupInformer schedulinginformer.PodGroupInformer
-	// podGroups[namespace][name] = target RodGroup.
-	podGroups map[string]map[string]*schedulingv1beta1.PodGroup
-
 	priorityClassInformer schedv1.PriorityClassInformer
 	priorityClasses       map[string]*schedulingv1.PriorityClass
 	defaultPriorityClass  *schedulingv1.PriorityClass
@@ -78,7 +78,7 @@ type DispatcherCache struct {
 	// resourceBindings[namespace][name] = target ResourceBinding.
 	resourceBindings map[string]map[string]*workv1alpha2.ResourceBinding
 
-	// The infos only save basic information like RB, ResourceUID, Status in the cache, the PodGroup,
+	// The infos only save basic information like ResourceBinding, ResourceUID, Status in the cache,
 	// Queue, and Priority will update when Snapshot.
 	// resourceBindingInfos[namespace][name] = target ResourceBindingInfo.
 	resourceBindingInfos map[string]map[string]*api.ResourceBindingInfo
@@ -97,6 +97,10 @@ func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface 
 	if err != nil {
 		panic(fmt.Sprintf("failed to init kubeClient, with err: %v", err))
 	}
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		panic(fmt.Sprintf("failed to init dynamicClient, with err: %v", err))
+	}
 	volcanoClient, err := volcanoclientset.NewForConfig(config)
 	if err != nil {
 		panic(fmt.Sprintf("failed to init vcClient, with err: %v", err))
@@ -109,11 +113,19 @@ func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface 
 	// Create the default queue
 	utils.CreateDefaultQueue(volcanoClient, option.DefaultQueueName)
 
+	grp, err := restmapper.GetAPIGroupResources(kubeClient.Discovery())
+	if err != nil {
+		panic(fmt.Sprintf("failed to init grp, with err: %v", err))
+	}
+
 	sc := &DispatcherCache{
+		workerNum: option.WorkerNum,
+
 		kubeClient:    kubeClient,
-		workerNum:     option.WorkerNum,
+		dynamicClient: dynamicClient,
 		vcClient:      volcanoClient,
 		karmadaClient: karmadaClient,
+		restMapper:    restmapper.NewDiscoveryRESTMapper(grp),
 
 		informerFactory:        informers.NewSharedInformerFactory(kubeClient, 0),
 		volcanoInformerFactory: volcanoinformerfactory.NewSharedInformerFactory(volcanoClient, 0),
@@ -121,7 +133,6 @@ func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface 
 
 		queues:           map[string]*schedulingapi.QueueInfo{},
 		defaultQueue:     option.DefaultQueueName,
-		podGroups:        map[string]map[string]*schedulingv1beta1.PodGroup{},
 		priorityClasses:  map[string]*schedulingv1.PriorityClass{},
 		resourceBindings: map[string]map[string]*workv1alpha2.ResourceBinding{},
 
@@ -135,13 +146,6 @@ func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface 
 		AddFunc:    sc.addQueue,
 		UpdateFunc: sc.updateQueue,
 		DeleteFunc: sc.deleteQueue,
-	})
-
-	sc.podGroupInformer = sc.volcanoInformerFactory.Scheduling().V1beta1().PodGroups()
-	sc.podGroupInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    sc.addPodGroup,
-		UpdateFunc: sc.updatePodGroup,
-		DeleteFunc: sc.deletePodGroup,
 	})
 
 	sc.priorityClassInformer = sc.informerFactory.Scheduling().V1().PriorityClasses()

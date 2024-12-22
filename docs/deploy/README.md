@@ -126,7 +126,6 @@ the introduction of some `Volcano` CRDs to enable the **queue capability** for t
 
 Required `Volcano` CRD List:
 - batch.volcano.sh_jobs
-- scheduling.volcano.sh_podgroups
 - scheduling.volcano.sh_queues
 - bus.volcano.sh_commands
 
@@ -136,7 +135,6 @@ export KUBECONFIG=$HOME/.kube/karmada.config
 
 # Apply the required CRD to Karmada control plane.
 kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volcano/raw/release-1.10/installer/helm/chart/volcano/crd/bases/batch.volcano.sh_jobs.yaml
-kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volcano/raw/release-1.10/installer/helm/chart/volcano/crd/bases/scheduling.volcano.sh_podgroups.yaml
 kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volcano/raw/release-1.10/installer/helm/chart/volcano/crd/bases/scheduling.volcano.sh_queues.yaml
 kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volcano/raw/release-1.10/installer/helm/chart/volcano/crd/bases/bus.volcano.sh_commands.yaml
 ```

@@ -19,7 +19,6 @@ package cache
 import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
-	schedulingv1beta1 "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
 	schedulingapi "volcano.sh/volcano/pkg/scheduler/api"
 
 	"volcano.sh/volcano-global/pkg/dispatcher/api"
@@ -47,43 +46,21 @@ func (dc *DispatcherCache) Snapshot() *DispatcherCacheSnapshot {
 		snapshot.QueueInfos[queue.Name] = queue.Clone()
 	}
 
-	// Collect the PodGroups for ResourceBindingInfo.
-	// The map key was the PodGroup source resource's UID (like Deployment, Pod, volcano-job).
-	// A PodGroup may have multiple OwnerReference, we need to find the binding ResourceBinding by the map.
-	podGroupMap := map[types.UID]*schedulingv1beta1.PodGroup{}
-	for _, podGroups := range dc.podGroups {
-		for _, podGroup := range podGroups {
-			for _, ownerRef := range podGroup.OwnerReferences {
-				podGroupMap[ownerRef.UID] = podGroup
-			}
-		}
-	}
-
 	// Collect the ResourceBindingInfos.
 	// First, we should update the elements of the ResourceBindingInfo,
 	// because we only set some elements of them when creating the ResourceBindingInfo.
 	for _, resourceBindingInfoMap := range dc.resourceBindingInfos {
 		for _, rbi := range resourceBindingInfoMap {
-			// Collect the priority and PodGroup, only the Deployment, Pod and volcano-job will create PodGroup,
-			// So the PodGroup field may be nil.
-			rbi.Priority = 0
-			if dc.defaultPriorityClass != nil {
-				rbi.Priority = dc.defaultPriorityClass.Value
-			}
-
-			// Try find the binding PodGroup.
-			if pg, ok := podGroupMap[rbi.ResourceBinding.Spec.Resource.UID]; ok {
-				if pcName := pg.Spec.PriorityClassName; pcName != "" {
-					if dc.priorityClasses[pcName] == nil {
-						// It shouldn't happen. All the PriorityClass should in the cache.
-						klog.Errorf("PriorityClass <%s> not found in the cache when execute PodGroup <%s/%s>.",
-							pcName, pg.Namespace, pg.Name)
-					} else {
-						rbi.Priority = dc.priorityClasses[pcName].Value
-					}
+			// Get the priority of the workload.
+			if rbi.PriorityClassName != "" {
+				if dc.priorityClasses[rbi.PriorityClassName] == nil {
+					// It shouldn't happen. All the PriorityClass should in the cache.
+					klog.Errorf("PriorityClass <%s> not found in the cache.", rbi.PriorityClassName)
+					continue
 				}
-				rbi.PodGroup = pg
-				rbi.Queue = pg.Spec.Queue
+				rbi.Priority = dc.priorityClasses[rbi.PriorityClassName].Value
+			} else if dc.defaultPriorityClass != nil {
+				rbi.Priority = dc.defaultPriorityClass.Value
 			}
 
 			// On the end, we need to copy it.
