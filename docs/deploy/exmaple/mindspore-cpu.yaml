@@ -15,7 +15,7 @@ spec:
   maxRetry: 5
   queue: default
   tasks:
-    - replicas: 8
+    - replicas: 2
       name: "pod"
       template:
         spec:
@@ -26,7 +26,7 @@ spec:
               name: mindspore-cpu-job
               resources:
                 limits:
-                  cpu: "0.1"
+                  cpu: "0.25"
                 requests:
-                  cpu: "0.1"
+                  cpu: "0.25"
           restartPolicy: OnFailure

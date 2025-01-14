@@ -35,11 +35,8 @@ import (
 	"volcano.sh/volcano/pkg/version"
 
 	_ "volcano.sh/volcano/pkg/controllers/garbagecollector"
-	_ "volcano.sh/volcano/pkg/controllers/job"
-	_ "volcano.sh/volcano/pkg/controllers/podgroup"
 	_ "volcano.sh/volcano/pkg/controllers/queue"
 
-	_ "volcano.sh/volcano-global/pkg/controllers/deployment"
 	_ "volcano.sh/volcano-global/pkg/dispatcher"
 )
 

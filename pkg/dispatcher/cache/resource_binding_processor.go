@@ -104,9 +104,10 @@ func (dc *DispatcherCache) patchUnSuspendResourceBinding(rb *workv1alpha2.Resour
 	if err != nil {
 		klog.Errorf("Failed to patch/continue ResourceBinding <%s/%s>, err: %v",
 			rb.Namespace, rb.Namespace, err)
+		return err
 	} else {
 		klog.V(3).Infof("Success patch/continue ResourceBinding <%s/%s>.",
 			rb.Namespace, rb.Namespace)
 	}
-	return err
+	return nil
 }

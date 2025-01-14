@@ -17,15 +17,19 @@ limitations under the License.
 package cache
 
 import (
+	"context"
+
 	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/klog/v2"
 	"volcano.sh/apis/pkg/apis/scheduling"
 	"volcano.sh/apis/pkg/apis/scheduling/scheme"
-	schedulingv1beta1 "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
 	schedulingapi "volcano.sh/volcano/pkg/scheduler/api"
 
 	"volcano.sh/volcano-global/pkg/dispatcher/api"
-	"volcano.sh/volcano-global/pkg/utils"
+	"volcano.sh/volcano-global/pkg/workload"
 )
 
 func (dc *DispatcherCache) addQueue(obj interface{}) {
@@ -67,51 +71,6 @@ func (dc *DispatcherCache) updateQueue(oldObj, newObj interface{}) {
 
 	dc.deleteQueue(oldQueue)
 	dc.addQueue(newQueue)
-}
-
-func (dc *DispatcherCache) addPodGroup(obj interface{}) {
-	pg := convertToPodGroup(obj)
-	if pg == nil {
-		return
-	}
-	dc.mutex.Lock()
-	defer dc.mutex.Unlock()
-
-	if dc.podGroups[pg.Namespace] == nil {
-		dc.podGroups[pg.Namespace] = map[string]*schedulingv1beta1.PodGroup{
-			pg.Name: pg,
-		}
-	} else {
-		dc.podGroups[pg.Namespace][pg.Name] = pg
-	}
-}
-
-func (dc *DispatcherCache) deletePodGroup(obj interface{}) {
-	pg := convertToPodGroup(obj)
-	if pg == nil {
-		return
-	}
-	dc.mutex.Lock()
-	defer dc.mutex.Unlock()
-
-	if dc.podGroups[pg.Namespace] == nil {
-		klog.Errorf("Failed to delete PodGroup <%s/%s>, the PodGroup's "+
-			"Namespace should is not in the cache.", pg.Namespace, pg.Name)
-		return
-	} else {
-		delete(dc.podGroups[pg.Namespace], pg.Name)
-	}
-}
-
-func (dc *DispatcherCache) updatePodGroup(oldObj, newObj interface{}) {
-	oldPg := convertToPodGroup(oldObj)
-	newPg := convertToPodGroup(newObj)
-	if oldPg == nil || newPg == nil {
-		return
-	}
-
-	dc.deletePodGroup(oldPg)
-	dc.addPodGroup(newPg)
 }
 
 func (dc *DispatcherCache) addPriorityClass(obj interface{}) {
@@ -162,7 +121,7 @@ func (dc *DispatcherCache) addResourceBinding(obj interface{}) {
 	}
 
 	// Check if its workload, skip add to cache if not.
-	isWorkload, err := utils.IsWorkload(rb.Spec.Resource)
+	isWorkload, newWorkloadFunc, err := workload.TryGetNewWorkloadFunc(rb.Spec.Resource)
 	if err != nil {
 		klog.Errorf("Failed to check ResourceBinding <%s/%s> if workload, stop add it to cache, err: %v",
 			rb.Namespace, rb.Name, err)
@@ -171,6 +130,18 @@ func (dc *DispatcherCache) addResourceBinding(obj interface{}) {
 	if !isWorkload {
 		klog.V(3).Infof("ResourceBinding <%s/%s> is not a workload, skip add it to cache.",
 			rb.Namespace, rb.Name)
+		return
+	}
+
+	resource, err := dc.getResourceFromObjectReference(rb.Spec.Resource)
+	if err != nil {
+		klog.Errorf("Failed to get resource from object reference <%s/%s>, err: %v",
+			rb.Namespace, rb.Name, err)
+		return
+	}
+	workload, err := newWorkloadFunc(resource)
+	if err != nil {
+		klog.Errorf("Failed to create workload for resource <%s/%s>, err: %v", rb.Namespace, rb.Name, err)
 		return
 	}
 
@@ -188,9 +159,11 @@ func (dc *DispatcherCache) addResourceBinding(obj interface{}) {
 
 	// Build the ResourceBindingInfo, the other elements will set when Snapshot.
 	newResourceBindingInfo := &api.ResourceBindingInfo{
-		ResourceBinding: rb,
-		ResourceUID:     rb.Spec.Resource.UID,
-		DispatchStatus:  api.UnSuspended,
+		ResourceBinding:   rb,
+		ResourceUID:       rb.Spec.Resource.UID,
+		Queue:             workload.GetQueueName(),
+		PriorityClassName: workload.GetPriorityClassName(),
+		DispatchStatus:    api.UnSuspended,
 	}
 	// Currently, our failurePolicy is set to Fail, which ensures that no unexpected ResourceBindings will exist.
 	// When a ResourceBinding is created, it will definitely be updated to Suspend, so we don't need to check the Status.
@@ -234,4 +207,28 @@ func (dc *DispatcherCache) updateResourceBinding(oldObj, newObj interface{}) {
 
 	dc.deleteResourceBinding(oldRb)
 	dc.addResourceBinding(newRb)
+}
+
+func (dc *DispatcherCache) getResourceFromObjectReference(ref workv1alpha2.ObjectReference) (*unstructured.Unstructured, error) {
+	gv, err := schema.ParseGroupVersion(ref.APIVersion)
+	if err != nil {
+		klog.Errorf("Failed to parse GroupVersion <%s>, err: %v", ref.APIVersion, err)
+		return nil, err
+	}
+	mapping, err := dc.restMapper.RESTMapping(schema.GroupKind{
+		Group: gv.Group,
+		Kind:  ref.Kind,
+	})
+
+	if err != nil {
+		klog.Errorf("Failed to get resource mapping from reference <%s/%s>, err: %v")
+		return nil, err
+	}
+
+	resource, err := dc.dynamicClient.Resource(mapping.Resource).Namespace(ref.Namespace).Get(context.Background(), ref.Name, metav1.GetOptions{})
+	if err != nil {
+		klog.Errorf("Failed to get resource <%s/%s>, err: %v", ref.Namespace, ref.Name, err)
+		return nil, err
+	}
+	return resource, nil
 }

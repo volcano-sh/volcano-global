@@ -37,19 +37,6 @@ func convertToQueue(obj interface{}) *schedulingv1beta1.Queue {
 	return queue
 }
 
-func convertToPodGroup(obj interface{}) *schedulingv1beta1.PodGroup {
-	if d, ok := obj.(cache.DeletedFinalStateUnknown); ok {
-		obj = d.Obj
-	}
-
-	pg, ok := obj.(*schedulingv1beta1.PodGroup)
-	if !ok {
-		klog.Errorf("Failed to convert object to *schedulingv1beta1.PodGroup, obj: %v", obj)
-		return nil
-	}
-	return pg
-}
-
 func convertToPriorityClass(obj interface{}) *schedulingv1.PriorityClass {
 	if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
 		obj = tombstone.Obj
