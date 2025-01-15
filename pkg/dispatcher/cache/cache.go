@@ -31,6 +31,7 @@ import (
 	"k8s.io/client-go/informers"
 	schedv1 "k8s.io/client-go/informers/scheduling/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -39,7 +40,6 @@ import (
 	volcanoinformer "volcano.sh/apis/pkg/client/informers/externalversions"
 	volcanoinformerfactory "volcano.sh/apis/pkg/client/informers/externalversions"
 	schedulinginformer "volcano.sh/apis/pkg/client/informers/externalversions/scheduling/v1beta1"
-	"volcano.sh/volcano/pkg/kube"
 	schedulingapi "volcano.sh/volcano/pkg/scheduler/api"
 
 	"volcano.sh/volcano-global/pkg/dispatcher/api"
@@ -47,9 +47,9 @@ import (
 )
 
 type DispatcherCacheOption struct {
-	WorkerNum         uint32
-	DefaultQueueName  string
-	KubeClientOptions kube.ClientOptions
+	WorkerNum        uint32
+	DefaultQueueName string
+	RestConfig       *rest.Config
 }
 
 type DispatcherCache struct {
@@ -89,10 +89,7 @@ type DispatcherCache struct {
 }
 
 func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface {
-	config, err := kube.BuildConfig(option.KubeClientOptions)
-	if err != nil {
-		panic(fmt.Sprintf("failed to build kubeConfig, with err: %v", err))
-	}
+	config := option.RestConfig
 	kubeClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		panic(fmt.Sprintf("failed to init kubeClient, with err: %v", err))

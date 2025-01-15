@@ -93,21 +93,26 @@ func (dc *DispatcherCache) unSuspendResourceBinding(rb *workv1alpha2.ResourceBin
 }
 
 func (dc *DispatcherCache) patchUnSuspendResourceBinding(rb *workv1alpha2.ResourceBinding) error {
-	patchBytes, _ := json.Marshal([]jsonpatch.Operation{
-		{Operation: "replace", Path: "/spec/suspend", Value: false},
+	patchBytes, err := json.Marshal([]jsonpatch.Operation{
+		{Operation: "add", Path: "/spec/suspension", Value: map[string]interface{}{
+			"scheduling": false,
+		}},
 	})
+	if err != nil {
+		return err
+	}
 
 	// Patch the ResourceBinding.spec.suspend = false.
-	_, err := dc.karmadaClient.WorkV1alpha2().ResourceBindings(rb.Namespace).Patch(context.TODO(),
+	_, err = dc.karmadaClient.WorkV1alpha2().ResourceBindings(rb.Namespace).Patch(context.TODO(),
 		rb.Name, types.JSONPatchType, patchBytes, metav1.PatchOptions{})
 
 	if err != nil {
 		klog.Errorf("Failed to patch/continue ResourceBinding <%s/%s>, err: %v",
-			rb.Namespace, rb.Namespace, err)
+			rb.Namespace, rb.Name, err)
 		return err
 	} else {
 		klog.V(3).Infof("Success patch/continue ResourceBinding <%s/%s>.",
-			rb.Namespace, rb.Namespace)
+			rb.Namespace, rb.Name)
 	}
 	return nil
 }

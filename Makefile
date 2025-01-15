@@ -54,14 +54,11 @@ include Makefile.def
 
 .EXPORT_ALL_VARIABLES:
 
-all: volcano-global-scheduler volcano-global-controller-manager volcano-global-webhook-manager
+all: volcano-global-controller-manager volcano-global-webhook-manager
 
 init:
 	mkdir -p ${BIN_DIR}
 	mkdir -p ${RELEASE_DIR}
-
-volcano-global-scheduler: init
-	CC=${CC} CGO_ENABLED=0 go build -ldflags ${LD_FLAGS} -o ${BIN_DIR}/volcano-global-scheduler ./cmd/scheduler
 
 volcano-global-controller-manager: init
 	CC=${CC} CGO_ENABLED=0 go build -ldflags ${LD_FLAGS} -o ${BIN_DIR}/volcano-global-controller-manager ./cmd/controller-manager
@@ -71,7 +68,7 @@ volcano-global-webhook-manager: init
 
 images:
 	set -e; \
-	for name in scheduler controller-manager webhook-manager; do \
+	for name in controller-manager webhook-manager; do \
 		docker buildx build -t "${IMAGE_PREFIX}/volcano-global-$$name:$(TAG)" . -f ./installer/dockerfile/$$name/Dockerfile --output=type=${BUILDX_OUTPUT_TYPE} --platform ${DOCKER_PLATFORMS} --build-arg APK_MIRROR=${APK_MIRROR}; \
 	done
 

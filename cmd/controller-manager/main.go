@@ -34,10 +34,10 @@ import (
 	commonutil "volcano.sh/volcano/pkg/util"
 	"volcano.sh/volcano/pkg/version"
 
-	_ "volcano.sh/volcano/pkg/controllers/garbagecollector"
-	_ "volcano.sh/volcano/pkg/controllers/queue"
+	dispatcheroptions "volcano.sh/volcano-global/pkg/dispatcher/options"
 
 	_ "volcano.sh/volcano-global/pkg/dispatcher"
+	_ "volcano.sh/volcano/pkg/controllers/garbagecollector"
 )
 
 const componentName = "volcano-global-controller-manager"
@@ -65,7 +65,8 @@ func main() {
 	commonutil.LeaderElectionDefault(&s.LeaderElection)
 	s.LeaderElection.ResourceName = componentName
 	componentbaseoptions.BindLeaderElectionFlags(&s.LeaderElection, fs)
-
+	// add dispatcher flag.
+	fs.AddFlagSet(dispatcheroptions.RegisterDispatcherFlags())
 	cliflag.InitFlags()
 
 	if s.PrintVersion {

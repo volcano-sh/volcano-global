@@ -1,5 +1,5 @@
 apiVersion: policy.karmada.io/v1alpha1
-kind: PropagationPolicy
+kind: ClusterPropagationPolicy
 metadata:
   name: volcano-global-all-queue-propagation
 spec:

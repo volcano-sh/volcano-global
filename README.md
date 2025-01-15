@@ -1,8 +1,10 @@
 # Volcano Global
 
-Volcano-global is a multiple kubernetes clusters scheduler, designed to efficiently manage and schedule AI/ML,
+`Volcano-global` is a multiple kubernetes clusters scheduler, designed to efficiently manage and schedule AI/ML,
 Bigdata workloads across multiple kubernetes clusters,
-which cleverly combines the capabilities of [Karmada](https://karmada.io/) and [Volcano](https://volcano.sh/en/)
+which cleverly combines the capabilities of [Karmada](https://karmada.io/) and [Volcano](https://volcano.sh/en/).
+
+`Volcano-global` has implemented a series of advanced capabilities based on Karmada, such as AI job scheduling and queue management, which are inherited from Volcano's single-cluster capabilities. Additionally, it addresses scenarios involving single/multiple template tasks.
 
 This project originated from:
 - [LFX Mentorship CNCF - Volcano: Volcano supports multi-cluster AI workloads scheduling](https://mentorship.lfx.linuxfoundation.org/project/132a4971-6969-4ca6-a695-783ece3ac768)
