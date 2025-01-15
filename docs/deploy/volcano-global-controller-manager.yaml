@@ -20,8 +20,10 @@ spec:
           args:
             - --kubeconfig=/etc/kubeconfig/karmada.config
             - --leader-elect=false
+            - --leader-elect-resource-namespace=volcano-global
             - --logtostderr
             - --enable-healthz=true
+            - --dispatch-period=1s
             - -v=5
             - 2>&1
           imagePullPolicy: Never

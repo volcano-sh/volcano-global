@@ -25,10 +25,10 @@ import (
 	registrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 	"volcano.sh/volcano/pkg/webhooks/router"
 	"volcano.sh/volcano/pkg/webhooks/util"
 
-	"volcano.sh/volcano-global/pkg/utils"
 	"volcano.sh/volcano-global/pkg/webhooks/decoder"
 	"volcano.sh/volcano-global/pkg/workload"
 )
@@ -61,7 +61,7 @@ var service = &router.AdmissionService{
 func ResourceBindings(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
 	if ar.Request == nil || ar.Request.Operation != admissionv1.Create {
 		// This error should not be happened; We have set the rule for CREATE operation only.
-		return util.ToAdmissionResponse(fmt.Errorf("expect operation is '%s'", admissionv1.Create))
+		return util.ToAdmissionResponse(fmt.Errorf("expect operation to be '%s'", admissionv1.Create))
 	}
 	klog.V(3).Infof("Mutating %s operation for ResourceBinding <%s/%s>.",
 		ar.Request.Operation, ar.Request.Namespace, ar.Request.Name)
@@ -72,8 +72,9 @@ func ResourceBindings(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResp
 	}
 
 	response := &admissionv1.AdmissionResponse{Allowed: true}
-	if rb.Spec.Suspend == true {
-		// This should not be happened, the `suspend` will update to True by this webhook when create the resourceBinding.
+
+	// This should not happen, the `suspend` will update to true by this webhook when create the resourceBinding.
+	if rb.Spec.SchedulingSuspended() {
 		return response
 	}
 
@@ -85,19 +86,21 @@ func ResourceBindings(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResp
 		return util.ToAdmissionResponse(err)
 	}
 	if !isWorkload {
-		klog.V(3).Infof("ResourceBinding <%s/%s> is not a workload, skip suspend it.",
+		klog.Errorf("ResourceBinding <%s/%s> is not a workload, skip suspend it.",
 			rb.Namespace, rb.Name)
 		return response
 	}
 
 	// Create the patch, update the suspend field.
 	response.Patch, err = json.Marshal([]jsonpatch.Operation{
-		{Operation: "replace", Path: "/spec/suspend", Value: true},
+		{Operation: "add", Path: "/spec/suspension", Value: map[string]interface{}{
+			"scheduling": true,
+		}},
 	})
 	if err != nil {
 		return util.ToAdmissionResponse(err)
 	}
 
-	response.PatchType = utils.ToPointer(admissionv1.PatchTypeJSONPatch)
+	response.PatchType = ptr.To(admissionv1.PatchTypeJSONPatch)
 	return response
 }
