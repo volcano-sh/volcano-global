@@ -18,23 +18,20 @@ package workload
 
 import (
 	"fmt"
+	"sync"
 
 	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	batchv1alpha1 "volcano.sh/apis/pkg/apis/batch/v1alpha1"
+	"k8s.io/klog/v2"
 )
 
 type NewWorkloadFunc func(*unstructured.Unstructured) (Workload, error)
 
-// This map contains the workload that we can handle now, the controllers will create PodGroup for them.
-var workloadGVKMap = map[schema.GroupVersionKind]NewWorkloadFunc{
-	{
-		Group:   batchv1alpha1.SchemeGroupVersion.Group,
-		Version: batchv1alpha1.SchemeGroupVersion.Version,
-		Kind:    "Job",
-	}: NewVolcanoJobWorkload,
-}
+var (
+	lock           sync.RWMutex
+	workloadGVKMap = make(map[schema.GroupVersionKind]NewWorkloadFunc)
+)
 
 func TryGetNewWorkloadFunc(ref workv1alpha2.ObjectReference) (bool, NewWorkloadFunc, error) {
 	gv, err := schema.ParseGroupVersion(ref.APIVersion)
@@ -51,4 +48,19 @@ func TryGetNewWorkloadFunc(ref workv1alpha2.ObjectReference) (bool, NewWorkloadF
 		return false, nil, nil
 	}
 	return true, retFunc, nil
+}
+
+// Register allows different workloads register themselves to workloadGVKMap,
+// this is used when get queue and priorityClass of a specific workload,
+// and only resourceBinding referenced to registered workload supports suspension.
+func Register(gvk schema.GroupVersionKind, fn NewWorkloadFunc) {
+	lock.Lock()
+	defer lock.Unlock()
+
+	if _, exists := workloadGVKMap[gvk]; exists {
+		klog.ErrorS(nil, "Workload already registered", "gvk", gvk)
+		return
+	}
+	workloadGVKMap[gvk] = fn
+	klog.InfoS("Successfully registered workload", "gvk", gvk)
 }

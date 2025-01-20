@@ -25,10 +25,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 	schedulingv1beta1 "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
 	volcanoclientset "volcano.sh/apis/pkg/client/clientset/versioned"
-
-	"volcano.sh/volcano-global/pkg/utils"
 )
 
 // CreateDefaultQueue Create the default queue.
@@ -46,7 +45,7 @@ func CreateDefaultQueue(volcanoClient volcanoclientset.Interface, queueName stri
 				Name: queueName,
 			},
 			Spec: schedulingv1beta1.QueueSpec{
-				Reclaimable: utils.ToPointer(true),
+				Reclaimable: ptr.To(true),
 				Weight:      1,
 			},
 		}, metav1.CreateOptions{})

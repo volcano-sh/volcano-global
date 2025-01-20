@@ -1,3 +1,12 @@
+apiVersion: scheduling.volcano.sh/v1beta1
+kind: Queue
+metadata:
+  name: test
+spec:
+  reclaimable: true
+  weight: 1
+
+---
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
@@ -13,7 +22,7 @@ spec:
     env: []
     svc: []
   maxRetry: 5
-  queue: default
+  queue: test
   tasks:
     - replicas: 2
       name: "pod"

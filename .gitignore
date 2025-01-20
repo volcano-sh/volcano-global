@@ -4,3 +4,5 @@
 
 vendor
 _output
+
+_*.DS_Store
