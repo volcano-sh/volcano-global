@@ -161,13 +161,14 @@ func (dc *DispatcherCache) addResourceBinding(obj interface{}) {
 	newResourceBindingInfo := &api.ResourceBindingInfo{
 		ResourceBinding:   rb,
 		ResourceUID:       rb.Spec.Resource.UID,
-		Queue:             workload.GetQueueName(),
-		PriorityClassName: workload.GetPriorityClassName(),
+		Queue:             workload.QueueName(),
+		PriorityClassName: workload.PriorityClassName(),
 		DispatchStatus:    api.UnSuspended,
 	}
 	// Currently, our failurePolicy is set to Fail, which ensures that no unexpected ResourceBindings will exist.
-	// When a ResourceBinding is created, it will definitely be updated to Suspend, so we don't need to check the Status.
-	if rb.Spec.Suspend {
+	// When a ResourceBinding is created, it will definitely be updated to Suspend, so we don't need to check the Status,
+	// so rb should be suspended normally.
+	if rb.Spec.SchedulingSuspended() {
 		newResourceBindingInfo.DispatchStatus = api.Suspended
 	}
 
@@ -225,6 +226,7 @@ func (dc *DispatcherCache) getResourceFromObjectReference(ref workv1alpha2.Objec
 		return nil, err
 	}
 
+	// TODO: use informer instead.
 	resource, err := dc.dynamicClient.Resource(mapping.Resource).Namespace(ref.Namespace).Get(context.Background(), ref.Name, metav1.GetOptions{})
 	if err != nil {
 		klog.Errorf("Failed to get resource <%s/%s>, err: %v", ref.Namespace, ref.Name, err)

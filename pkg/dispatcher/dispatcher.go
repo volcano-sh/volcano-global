@@ -17,9 +17,7 @@ limitations under the License.
 package dispatcher
 
 import (
-	"flag"
 	"fmt"
-	"os"
 	"time"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -32,6 +30,9 @@ import (
 	"volcano.sh/volcano-global/pkg/dispatcher/api"
 	"volcano.sh/volcano-global/pkg/dispatcher/cache"
 	dispatcherframework "volcano.sh/volcano-global/pkg/dispatcher/framework"
+	"volcano.sh/volcano-global/pkg/dispatcher/options"
+
+	_ "volcano.sh/volcano-global/pkg/dispatcher/plugins"
 )
 
 func init() {
@@ -42,9 +43,6 @@ func init() {
 
 const (
 	dispatcherName = "dispatcher"
-
-	defaultDispatchPeriod = time.Second
-	defaultQueue          = "default"
 )
 
 type Dispatcher struct {
@@ -58,25 +56,12 @@ func (dispatcher *Dispatcher) Name() string {
 
 func (dispatcher *Dispatcher) Initialize(opt *framework.ControllerOption) error {
 	cacheOption := &cache.DispatcherCacheOption{
-		WorkerNum: opt.WorkerNum,
+		WorkerNum:        opt.WorkerNum,
+		DefaultQueueName: options.Opt.DefaultQueueName,
+		RestConfig:       opt.Config,
 	}
 
-	{
-		// We need to get some additional parameters from the command line.The dispatcher is actually a controller, but it also has functions similar to the volcano-scheduler.
-		// However, adding a new component seems to be a heavy-handed approach at the moment. Therefore, while getting the controllerOption,
-		// we need to get some additional parameters here, even though this approach isn't very elegant :)
-		fs := flag.NewFlagSet(fmt.Sprintf("%s-%s", dispatcherName, "flags"), flag.ContinueOnError)
-		fs.StringVar(&cacheOption.KubeClientOptions.Master, "master", cacheOption.KubeClientOptions.Master, "The address of the Kubernetes API server (overrides any value in kubeconfig)")
-		fs.StringVar(&cacheOption.KubeClientOptions.KubeConfig, "kubeconfig", cacheOption.KubeClientOptions.KubeConfig, "Path to kubeconfig file with authorization and master location information")
-		fs.StringVar(&cacheOption.DefaultQueueName, "default-queue", defaultQueue, "The default queue name of the workload")
-
-		fs.DurationVar(&dispatcher.dispatchPeriod, "dispatch-period", defaultDispatchPeriod, "The period between each scheduling cycle")
-
-		if err := fs.Parse(os.Args[1:]); err != nil {
-			klog.Errorf("Parse flags err: %v", err)
-		}
-	}
-
+	dispatcher.dispatchPeriod = options.Opt.DispatchPeriod
 	dispatcher.cache = cache.NewDispatcherCache(cacheOption)
 	return nil
 }

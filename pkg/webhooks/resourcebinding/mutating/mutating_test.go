@@ -18,18 +18,18 @@ package mutating
 
 import (
 	"fmt"
-	"reflect"
 	"testing"
 
 	"github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
+	"github.com/stretchr/testify/assert"
 	"gomodules.xyz/jsonpatch/v2"
 	admissionv1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/utils/ptr"
 
-	"volcano.sh/volcano-global/pkg/utils"
 	"volcano.sh/volcano-global/pkg/webhooks/decoder"
 )
 
@@ -43,7 +43,7 @@ func TestResourceBindings(t *testing.T) {
 				APIVersion: appsv1.SchemeGroupVersion.String(),
 				Kind:       "Deployment",
 			},
-			Suspend: true,
+			Suspension: &v1alpha2.Suspension{Scheduling: ptr.To(true)},
 		},
 	})
 	if err != nil {
@@ -66,7 +66,9 @@ func TestResourceBindings(t *testing.T) {
 	}
 
 	normalResponsePatch, err := json.Marshal([]jsonpatch.Operation{
-		{Operation: "replace", Path: "/spec/suspend", Value: true},
+		{Operation: "add", Path: "/spec/suspension", Value: map[string]interface{}{
+			"scheduling": true,
+		}},
 	})
 	if err != nil {
 		t.Errorf("Failed to marshal normal response patch json, err: %v", err)
@@ -89,7 +91,7 @@ func TestResourceBindings(t *testing.T) {
 			expectResponse: admissionv1.AdmissionResponse{
 				Allowed:   true,
 				Patch:     normalResponsePatch,
-				PatchType: utils.ToPointer(admissionv1.PatchTypeJSONPatch),
+				PatchType: ptr.To(admissionv1.PatchTypeJSONPatch),
 			},
 		},
 		{
@@ -144,8 +146,6 @@ func TestResourceBindings(t *testing.T) {
 
 	for _, tc := range testCases {
 		response := ResourceBindings(tc.review)
-		if !reflect.DeepEqual(*response, tc.expectResponse) {
-			t.Errorf("Test case %s failed, got: %v expect: %v", tc.Name, response, tc.expectResponse)
-		}
+		assert.EqualValues(t, tc.expectResponse, *response)
 	}
 }

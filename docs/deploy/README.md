@@ -2,17 +2,11 @@
 
 # The Structure of the whole multi-cluster
 
-![architecture_diagram.png](../imgs/architecture_diagram.png)
+![architecture_diagram.svg](../imgs/architecture_diagram.svg)
 
 `Volcano-global` is deployed on the basis of `Karmada`. After deploying
 `Karmada`, you need to deploy [`Volcano`](https://github.com/volcano-sh/volcano)
 on the worker cluster and deploy three components of `Volcano-global` in the `Karmada control plane`.
-
-The scheduler of `volcano-global` is customized based on the extension points of the `Karmada scheduler`.
-Compared to the `Karmada Scheduler`, it provides the capability to schedule AI jobs,
-as well as handles scenarios involving **single/multiple template tasks**.
-Additionally, it can perform all the functions that the `Karmada scheduler` is capable of, **ensuring compatibility**.
-And it needs to **replace the `Karmada scheduler`**.
 
 This installation document will provide examples based on deploying `Karmada` using `./hack/local-up-karmada.sh`.
 You can modify the deployment method according to different environments.
@@ -21,18 +15,13 @@ You can modify the deployment method according to different environments.
 
 ## 1. Deploy the Karmada
 
-Suggest `Karmada` Version: **1.10**
+Suggest `Karmada` Version: **master**
 
 Follow the [karmada get started guide](https://karmada.io/docs/get-started/nginx-example) to deploy `Karmada`.
 
-Currently, `Karmada` does not support the suspend capability for `ResourceBinding`.
-You need to fork this branch to deploy it.
-
-https://github.com/Vacant2333/karmada/tree/add-suspend-field-for-resourcebinding
-
 ```bash
-# Clone the target branch
-git clone -b add-suspend-field-for-resourcebinding https://github.com/Vacant2333/karmada.git
+# Clone the karmada repo
+git clone https://github.com/karmada-io/karmada.git
 
 cd karmada
 
@@ -83,43 +72,35 @@ kubectl --context karmada-host annotate secret karmada-webhook-config \
 You need to build the images on the root direction of the project.
 
 ```bash
+git clone https://github.com/volcano-sh/volcano-global.git
+
+cd volcano-global
+
 # Build the components.
 TAG=1.0 make images
 
 # Load the image to karmada host cluster.
-kind load docker-image --name karmada-host volcanosh/volcano-global-scheduler:1.0
 kind load docker-image --name karmada-host volcanosh/volcano-global-controller-manager:1.0
 kind load docker-image --name karmada-host volcanosh/volcano-global-webhook-manager:1.0
 ```
 
-You need to run these commands on `docs/deploy` direction.
-
 ```bash
 # Switch to Karmada host kubeconfig.
 export KUBECONFIG=$HOME/.kube/karmada.config
+
+# Create volcano-global namespace first in karmada APIServer to used by leader election.
+kubectl --context karmada-apiserver apply -f docs/deploy/volcano-global-namespace.yaml
 
 # Apply the component deployment yaml.
-kubectl --context karmada-host apply -f volcano-global-namespace.yaml
-kubectl --context karmada-host apply -f volcano-global-controller-manager.yaml
-kubectl --context karmada-host apply -f volcano-global-webhook-manager.yaml
+kubectl --context karmada-host apply -f docs/deploy/volcano-global-namespace.yaml
+kubectl --context karmada-host apply -f docs/deploy/volcano-global-controller-manager.yaml
+kubectl --context karmada-host apply -f docs/deploy/volcano-global-webhook-manager.yaml
 
 # Apply the webhook configuration.
-kubectl --context karmada-apiserver apply -f volcano-global-webhooks.yaml
+kubectl --context karmada-apiserver apply -f docs/deploy/volcano-global-webhooks.yaml
 ```
 
-## 5. Deploy the volcano-global scheduler to replace karmada scheduler at Karmada control plane cluster
-
-```bash
-# Switch to Karmada host kubeconfig.
-export KUBECONFIG=$HOME/.kube/karmada.config
-
-# Update the karmada scheduler image.
-kubectl --context karmada-host set image deployment/karmada-scheduler \
-  karmada-scheduler=volcanosh/volcano-global-scheduler:1.0 \
-  -n karmada-system
-```
-
-## 6. Apply the required CRD at Karmada control plane
+## 5. Apply the required CRD at Karmada control plane
 
 In addition to using `Karmada` CRDs, `volcano-global` also requires
 the introduction of some `Volcano` CRDs to enable the **queue capability** for the `volcano-global dispatcher`.
@@ -136,25 +117,23 @@ export KUBECONFIG=$HOME/.kube/karmada.config
 # Apply the required CRD to Karmada control plane.
 kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volcano/raw/release-1.10/installer/helm/chart/volcano/crd/bases/batch.volcano.sh_jobs.yaml
 kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volcano/raw/release-1.10/installer/helm/chart/volcano/crd/bases/scheduling.volcano.sh_queues.yaml
-kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volcano/raw/release-1.10/installer/helm/chart/volcano/crd/bases/bus.volcano.sh_commands.yaml
 ```
 
-## 7. Apply the custom volcano job resource interpreter at Karmada control plane
+## 6. Apply the custom volcano job and queue resource interpreters at Karmada control plane
 
 We need to add a `custom resource interpreter` for the `Volcano` job to synchronize
 the job status to the `Karmada control plane`.
-
-You need to run these commands on `docs/deploy` direction.
 
 ```bash
 # Switch to Karmada host kubeconfig.
 export KUBECONFIG=$HOME/.kube/karmada.config
 
-# Apply the volcano job resource interpreter customization configuration.
-kubectl --context karmada-apiserver apply -f vcjob-resource-interpreter-customization.yaml
+# Apply the volcano job and queue resource interpreters customization configuration.
+kubectl --context karmada-apiserver apply -f docs/deploy/vcjob-resource-interpreter-customization.yaml
+kubectl --context karmada-apiserver apply -f docs/deploy/queue-resource-interpreter-customization.yaml
 ```
 
-## 8. Apply the All-Queue-PropagationPolicy at Karmada control plane
+## 7. Apply the All-Queue-PropagationPolicy at Karmada control plane
 
 By default, we **distribute all `Queues` from the control plane to every `Worker Cluster`**
 to prevent tasks from being dispatched to a `Worker Cluster` without a corresponding `Queue`.
@@ -171,22 +150,20 @@ to prevent unintended consequences due to accidental deletion.
 export KUBECONFIG=$HOME/.kube/karmada.config
 
 # Apply the volcano job resource interpreter customization configuration.
-kubectl --context karmada-apiserver apply -f volcano-global-all-queue-propagation.yaml
+kubectl --context karmada-apiserver apply -f docs/deploy/volcano-global-all-queue-propagation.yaml
 
-# Protect the PropagationPolicy.
-kubectl --context karmada-apiserver label propagationpolicy volcano-global-all-queue-propagation resourcetemplate.karmada.io/deletion-protected=Always
+# Protect the ClusterPropagationPolicy.
+kubectl --context karmada-apiserver label clusterpropagationpolicy volcano-global-all-queue-propagation resourcetemplate.karmada.io/deletion-protected=Always
 ```
 
-## 9. Try the example Job
-
-You need to run these commands on `docs/deploy` direction.
+## 8. Try the example Job
 
 ```bash
 # Switch to Karmada host kubeconfig.
 export KUBECONFIG=$HOME/.kube/karmada.config
 
 # Apply the example job, try to care the status of member clusters.
-kubectl --context karmada-apiserver apply -f exmaple/.
+kubectl --context karmada-apiserver apply -f docs/deploy/exmaple/.
 ```
 
 You will see like:
