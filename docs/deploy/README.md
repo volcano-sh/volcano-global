@@ -31,7 +31,7 @@ cd karmada
 
 ## 2. Deploy the Volcano to member clusters
 
-Suggest `Volcano` Version: **1.10.0**
+Suggest `Volcano` Version: **v1.10.0 or higher**
 
 Follow the [volcano installation guide](https://volcano.sh/en/docs/v1-9-0/installation/) to deploy `Volcano` to the member clusters.
 
@@ -69,21 +69,6 @@ kubectl --context karmada-host annotate secret karmada-webhook-config \
 
 ## 4. Deploy the volcano-global controller and webhook manager at Karmada control plane cluster
 
-You need to build the images on the root direction of the project.
-
-```bash
-git clone https://github.com/volcano-sh/volcano-global.git
-
-cd volcano-global
-
-# Build the components.
-TAG=1.0 make images
-
-# Load the image to karmada host cluster.
-kind load docker-image --name karmada-host volcanosh/volcano-global-controller-manager:1.0
-kind load docker-image --name karmada-host volcanosh/volcano-global-webhook-manager:1.0
-```
-
 ```bash
 # Switch to Karmada host kubeconfig.
 export KUBECONFIG=$HOME/.kube/karmada.config
@@ -108,7 +93,6 @@ the introduction of some `Volcano` CRDs to enable the **queue capability** for t
 Required `Volcano` CRD List:
 - batch.volcano.sh_jobs
 - scheduling.volcano.sh_queues
-- bus.volcano.sh_commands
 
 ```bash
 # Switch to Karmada host kubeconfig.

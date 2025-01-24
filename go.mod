@@ -15,8 +15,8 @@ require (
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kube-openapi v0.0.0-20240620174524-b456828f718b
 	k8s.io/utils v0.0.0-20240711033017-18e509b52bc8
-	volcano.sh/apis v1.10.0-alpha.0.0.20241210014034-bf27f4e986d0
-	volcano.sh/volcano v1.9.0-alpha.0.0.20250119012250-4dea29b33487
+	volcano.sh/apis v1.11.0
+	volcano.sh/volcano v1.11.0
 )
 
 require (

@@ -31,8 +31,8 @@ spec:
             - --port=8443
             - -v=5
             - 2>&1
-          image: volcanosh/volcano-global-webhook-manager:1.0
-          imagePullPolicy: Never
+          image: volcanosh/volcano-global-webhook-manager:v0.1.0
+          imagePullPolicy: Always
           volumeMounts:
             - mountPath: /admission.local.config/certificates
               name: admission-certs
@@ -78,8 +78,8 @@ spec:
       restartPolicy: Never
       containers:
         - name: main
-          image: volcanosh/volcano-global-webhook-manager:1.0
-          imagePullPolicy: Never
+          image: volcanosh/volcano-global-webhook-manager:v0.1.0
+          imagePullPolicy: Always
           command: ["./gen-admission-secret.sh", "--service", "volcano-global-webhook", "--namespace",
                     "volcano-global", "--secret", "volcano-global-webhook-cert"]
 ---

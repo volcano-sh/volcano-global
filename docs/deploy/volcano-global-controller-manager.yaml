@@ -16,7 +16,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: volcano-global-controllers-manager
-          image: volcanosh/volcano-global-controller-manager:1.0
+          image: volcanosh/volcano-global-controller-manager:v0.1.0
           args:
             - --kubeconfig=/etc/kubeconfig/karmada.config
             - --leader-elect=false
@@ -26,7 +26,7 @@ spec:
             - --dispatch-period=1s
             - -v=5
             - 2>&1
-          imagePullPolicy: Never
+          imagePullPolicy: Always
           volumeMounts:
             - name: webhook-config
               mountPath: /etc/kubeconfig
