@@ -313,7 +313,7 @@ sigs.k8s.io/structured-merge-diff/v4 v4.4.1 h1:150L+0vs/8DA78h1u02ooW1/fFq/Lwr+s
 sigs.k8s.io/structured-merge-diff/v4 v4.4.1/go.mod h1:N8hJocpFajUSSeSJ9bOZ77VzejKZaXsTtZo4/u7Io08=
 sigs.k8s.io/yaml v1.4.0 h1:Mk1wCc2gy/F0THH0TAp1QYyJNzRm2KCLy3o5ASXVI5E=
 sigs.k8s.io/yaml v1.4.0/go.mod h1:Ejl7/uTz7PSA4eKMyQCUTnhZYNmLIl+5c2lQPGR2BPY=
-volcano.sh/apis v1.10.0-alpha.0.0.20241210014034-bf27f4e986d0 h1:qcQNg8mEsXU+7YYX6hff9JT+jDj2RJB4aEGwOoWwjBY=
-volcano.sh/apis v1.10.0-alpha.0.0.20241210014034-bf27f4e986d0/go.mod h1:FOdmG++9+8lgENJ9XXDh+O3Jcb9YVRnlMSpgIh3NSVI=
-volcano.sh/volcano v1.9.0-alpha.0.0.20250119012250-4dea29b33487 h1:HAhqwO7bEf2CX8Tn0JtVwXFa6UOOBb99fiaA+6bmXtA=
-volcano.sh/volcano v1.9.0-alpha.0.0.20250119012250-4dea29b33487/go.mod h1:fTyvizNSGMvK5btjH2QdKEZwvYvJ/3A261KTDLDRQ/U=
+volcano.sh/apis v1.11.0 h1:Z5ZXxxgUNfXv1OhfVXXfGPN7StoSsozQM+8CAPoNWY8=
+volcano.sh/apis v1.11.0/go.mod h1:FOdmG++9+8lgENJ9XXDh+O3Jcb9YVRnlMSpgIh3NSVI=
+volcano.sh/volcano v1.11.0 h1:TWN5PUoYeWc/c6pHGBdEfmwmuGkJwEHMyxQhMqLebDU=
+volcano.sh/volcano v1.11.0/go.mod h1:wosWl0drSDh9wsnDZpp6hkjr5WEHlC7aK2aw2GLADj0=
