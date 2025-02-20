@@ -16,7 +16,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: volcano-global-controllers-manager
-          image: volcanosh/volcano-global-controller-manager:1.0
+          image: volcanosh/volcano-global-controller-manager:latest
           args:
             - --kubeconfig=/etc/kubeconfig/karmada.config
             - --leader-elect=false
