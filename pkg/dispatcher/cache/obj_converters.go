@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	clusterv1alpha1 "github.com/karmada-io/karmada/pkg/apis/cluster/v1alpha1"
 	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	"k8s.io/client-go/tools/cache"
@@ -31,7 +32,7 @@ func convertToQueue(obj interface{}) *schedulingv1beta1.Queue {
 
 	queue, ok := obj.(*schedulingv1beta1.Queue)
 	if !ok {
-		klog.Errorf("Cant Convert obj to *schedulingv1beta1.Queue, obj: %v", obj)
+		klog.Errorf("Can't Convert obj to *schedulingv1beta1.Queue, obj: %v", obj)
 		return nil
 	}
 	return queue
@@ -44,7 +45,7 @@ func convertToPriorityClass(obj interface{}) *schedulingv1.PriorityClass {
 
 	priorityClass, ok := obj.(*schedulingv1.PriorityClass)
 	if !ok {
-		klog.Errorf("Cant Convert obj to *schedulingv1.PriorityClass, obj: %v", obj)
+		klog.Errorf("Can't Convert obj to *schedulingv1.PriorityClass, obj: %v", obj)
 		return nil
 	}
 	return priorityClass
@@ -57,8 +58,21 @@ func convertToResourceBinding(obj interface{}) *workv1alpha2.ResourceBinding {
 
 	resourceBinding, ok := obj.(*workv1alpha2.ResourceBinding)
 	if !ok {
-		klog.Errorf("Cant Convert obj to *workv1alpha2.ResourceBinding, obj: %v", obj)
+		klog.Errorf("Can't Convert obj to *workv1alpha2.ResourceBinding, obj: %v", obj)
 		return nil
 	}
 	return resourceBinding
+}
+
+func convertToCluster(obj interface{}) *clusterv1alpha1.Cluster {
+	if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+		obj = tombstone.Obj
+	}
+
+	cluster, ok := obj.(*clusterv1alpha1.Cluster)
+	if !ok {
+		klog.Errorf("Can't Convert obj to *clusterv1alpha1.Cluster, obj: %v", obj)
+		return nil
+	}
+	return cluster
 }

@@ -30,6 +30,8 @@ type DispatcherCacheSnapshot struct {
 	QueueInfos   map[string]*schedulingapi.QueueInfo
 
 	ResourceBindingInfos map[types.UID]*api.ResourceBindingInfo
+
+	TotalResource *schedulingapi.Resource
 }
 
 func (dc *DispatcherCache) Snapshot() *DispatcherCacheSnapshot {
@@ -40,10 +42,15 @@ func (dc *DispatcherCache) Snapshot() *DispatcherCacheSnapshot {
 		DefaultQueue:         dc.defaultQueue,
 		QueueInfos:           make(map[string]*schedulingapi.QueueInfo, len(dc.queues)),
 		ResourceBindingInfos: make(map[types.UID]*api.ResourceBindingInfo),
+		TotalResource:        schedulingapi.EmptyResource(),
 	}
 
 	for _, queue := range dc.queues {
 		snapshot.QueueInfos[queue.Name] = queue.Clone()
+	}
+
+	for _, cluster := range dc.clusters {
+		snapshot.TotalResource.Add(schedulingapi.NewResource(cluster.Status.ResourceSummary.Allocatable))
 	}
 
 	// Collect the ResourceBindingInfos.

@@ -17,6 +17,8 @@ limitations under the License.
 package framework
 
 import (
+	"fmt"
+
 	volcanoapi "volcano.sh/volcano/pkg/scheduler/api"
 
 	"volcano.sh/volcano-global/pkg/dispatcher/api"
@@ -30,6 +32,16 @@ func (ssn *Session) AddResourceBindingInfoOrderFn(name string, compareFn volcano
 // AddQueueInfoOrderFn add queue order function to the session.
 func (ssn *Session) AddQueueInfoOrderFn(name string, compareFn volcanoapi.CompareFn) {
 	ssn.queueInfoOrderFns[name] = compareFn
+}
+
+// AddAllocatableFn add allocatable function
+func (ssn *Session) AddAllocatableFn(name string, fn api.AllocatableFn) {
+	ssn.allocatableFns[name] = fn
+}
+
+// AddEventHandler add event handlers
+func (ssn *Session) AddEventHandler(eh *EventHandler) {
+	ssn.eventHandlers = append(ssn.eventHandlers, eh)
 }
 
 func (ssn *Session) QueueInfoOrderFn(l, r interface{}) bool {
@@ -66,4 +78,48 @@ func (ssn *Session) ResourceBindingInfoOrderFn(l, r interface{}) bool {
 	}
 
 	return lv.ResourceBinding.CreationTimestamp.Before(&rv.ResourceBinding.CreationTimestamp)
+}
+
+// Allocatable invoke allocatable function of the plugins
+func (ssn *Session) Allocatable(queue *volcanoapi.QueueInfo, candidate *api.ResourceBindingInfo) bool {
+	for _, fn := range ssn.allocatableFns {
+		if !fn(queue, candidate) {
+			return false
+		}
+	}
+	return true
+}
+
+// Allocate event handlers
+func (ssn *Session) Allocate(rbi *api.ResourceBindingInfo) error {
+	var errInfos []error
+	for _, handler := range ssn.eventHandlers {
+		if handler.AllocateFunc != nil {
+			if err := handler.AllocateFunc(rbi); err != nil {
+				errInfos = append(errInfos, err)
+			}
+		}
+	}
+	if len(errInfos) > 0 {
+		return fmt.Errorf("resourceBindingInfo <%s/%s> allocate error and errInfos num is %d, UnAllocate will be called later to roll back the resources and status of the task",
+			rbi.ResourceBinding.Namespace, rbi.ResourceBinding.Name, len(errInfos))
+	}
+	return nil
+}
+
+// UnAllocate callback event handlers
+func (ssn *Session) UnAllocate(rbi *api.ResourceBindingInfo) error {
+	var errInfos []error
+	for _, handler := range ssn.eventHandlers {
+		if handler.DeallocateFunc != nil {
+			if err := handler.DeallocateFunc(rbi); err != nil {
+				errInfos = append(errInfos, err)
+			}
+		}
+	}
+	if len(errInfos) > 0 {
+		return fmt.Errorf("resourceBindingInfo <%s/%s> unallocate error and errInfos num is %d, UnAllocate will be called later to roll back the resources and status of the task",
+			rbi.ResourceBinding.Namespace, rbi.ResourceBinding.Name, len(errInfos))
+	}
+	return nil
 }

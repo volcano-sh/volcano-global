@@ -33,6 +33,7 @@ type FakeDispatcherCache struct {
 	DefaultQueue         string
 	Queues               map[string]*schedulingapi.QueueInfo
 	ResourceBindingInfos map[types.UID]*api.ResourceBindingInfo
+	TotalResource        *schedulingapi.Resource
 
 	UnSuspendingOrder []types.NamespacedName
 }
@@ -50,6 +51,7 @@ func (f *FakeDispatcherCache) Snapshot() *cache.DispatcherCacheSnapshot {
 		DefaultQueue:         f.DefaultQueue,
 		QueueInfos:           f.Queues,
 		ResourceBindingInfos: f.ResourceBindingInfos,
+		TotalResource:        f.TotalResource,
 	}
 }
 

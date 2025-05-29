@@ -29,6 +29,7 @@ import (
 	schedulingapi "volcano.sh/volcano/pkg/scheduler/api"
 
 	"volcano.sh/volcano-global/pkg/dispatcher/api"
+	"volcano.sh/volcano-global/pkg/utils"
 	"volcano.sh/volcano-global/pkg/workload"
 )
 
@@ -208,6 +209,42 @@ func (dc *DispatcherCache) updateResourceBinding(oldObj, newObj interface{}) {
 
 	dc.deleteResourceBinding(oldRb)
 	dc.addResourceBinding(newRb)
+}
+
+func (dc *DispatcherCache) addRCluster(obj interface{}) {
+	cluster := convertToCluster(obj)
+	if cluster == nil {
+		return
+	}
+	if ready, message := utils.CheckClusterReady(cluster); !ready {
+		klog.V(5).Info(message)
+		return
+	}
+
+	dc.mutex.Lock()
+	defer dc.mutex.Unlock()
+	dc.clusters[cluster.Name] = cluster
+}
+
+func (dc *DispatcherCache) deleteCluster(obj interface{}) {
+	cluster := convertToCluster(obj)
+	if cluster == nil {
+		return
+	}
+	dc.mutex.Lock()
+	defer dc.mutex.Unlock()
+	delete(dc.clusters, cluster.Name)
+}
+
+func (dc *DispatcherCache) updateCluster(oldObj, newObj interface{}) {
+	oldCluster := convertToCluster(oldObj)
+	newCluster := convertToCluster(newObj)
+	if oldCluster == nil || newCluster == nil {
+		return
+	}
+
+	dc.deleteCluster(oldCluster)
+	dc.addRCluster(newCluster)
 }
 
 func (dc *DispatcherCache) getResourceFromObjectReference(ref workv1alpha2.ObjectReference) (*unstructured.Unstructured, error) {
