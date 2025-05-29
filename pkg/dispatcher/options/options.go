@@ -28,8 +28,8 @@ var (
 )
 
 const (
-	defaultDispatchPeriod = time.Second
-	defaultQueue          = "default"
+	DefaultDispatchPeriod = time.Second
+	DefaultQueue          = "default"
 )
 
 func newOptions() *options {
@@ -54,6 +54,6 @@ func RegisterDispatcherFlags() *pflag.FlagSet {
 
 // AddFlags add dispatcher controller related flags.
 func (o *options) AddFlags(fs *pflag.FlagSet) {
-	fs.StringVar(&o.DefaultQueueName, "default-queue", defaultQueue, "The default queue name of the workload")
-	fs.DurationVar(&o.DispatchPeriod, "dispatch-period", defaultDispatchPeriod, "The period between each scheduling cycle")
+	fs.StringVar(&o.DefaultQueueName, "default-queue", DefaultQueue, "The default queue name of the workload")
+	fs.DurationVar(&o.DispatchPeriod, "dispatch-period", DefaultDispatchPeriod, "The period between each scheduling cycle")
 }

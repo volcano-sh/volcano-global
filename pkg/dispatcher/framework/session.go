@@ -36,6 +36,8 @@ type Session struct {
 	plugins                     map[string]Plugin
 	queueInfoOrderFns           map[string]volcanoapi.CompareFn
 	resourceBindingInfoOrderFns map[string]volcanoapi.CompareFn
+	allocatableFns              map[string]api.AllocatableFn
+	eventHandlers               []*EventHandler
 }
 
 func OpenSession(cache dispatchercache.DispatcherCacheInterface) *Session {
@@ -46,6 +48,7 @@ func OpenSession(cache dispatchercache.DispatcherCacheInterface) *Session {
 		plugins:                     map[string]Plugin{},
 		queueInfoOrderFns:           map[string]volcanoapi.CompareFn{},
 		resourceBindingInfoOrderFns: map[string]volcanoapi.CompareFn{},
+		allocatableFns:              map[string]api.AllocatableFn{},
 	}
 
 	// Register all the plugins to session.

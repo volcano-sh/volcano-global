@@ -169,13 +169,25 @@ func (dispatcher *Dispatcher) dispatch(ssn *dispatcherframework.Session) {
 
 		// Get the highest priority ResourceBinding from the queue.
 		rbi := resourceBindings.Pop().(*api.ResourceBindingInfo)
-
-		rbi.DispatchStatus = api.UnSuspending
-		dispatcher.cache.UnSuspendResourceBinding(types.NamespacedName{
-			Namespace: rbi.ResourceBinding.Namespace,
-			Name:      rbi.ResourceBinding.Name,
-		})
-		dispatchResourceBindingCount++
+		if ssn.Allocatable(queue, rbi) {
+			if err := ssn.Allocate(rbi); err != nil {
+				klog.Errorf("Failed to allocate ResourceBindingInfo <%s/%s>, err: %v",
+					rbi.ResourceBinding.Namespace, rbi.ResourceBinding.Name, err)
+				if err = ssn.UnAllocate(rbi); err != nil {
+					klog.Errorf("Failed to unallocate ResourceBindingInfo <%s/%s>, err: %v",
+						rbi.ResourceBinding.Namespace, rbi.ResourceBinding.Name, err)
+				}
+			} else {
+				rbi.DispatchStatus = api.UnSuspending
+				dispatcher.cache.UnSuspendResourceBinding(types.NamespacedName{
+					Namespace: rbi.ResourceBinding.Namespace,
+					Name:      rbi.ResourceBinding.Name,
+				})
+				dispatchResourceBindingCount++
+			}
+		} else {
+			klog.V(3).Infof("Queue <%s> is overused when considering ResourceBindingInfo <%s/%s>, ignore it.", queue.Name, rbi.ResourceBinding.Namespace, rbi.ResourceBinding.Name)
+		}
 
 		// Add the queue to roundedQueues if it still has ResourceBinding.
 		if !resourceBindings.Empty() {

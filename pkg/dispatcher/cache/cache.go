@@ -20,9 +20,11 @@ import (
 	"fmt"
 	"sync"
 
+	clusterv1alpha1 "github.com/karmada-io/karmada/pkg/apis/cluster/v1alpha1"
 	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
 	karmadaclientset "github.com/karmada-io/karmada/pkg/generated/clientset/versioned"
 	karmadainformerfactory "github.com/karmada-io/karmada/pkg/generated/informers/externalversions"
+	informerclusterv1alpha1 "github.com/karmada-io/karmada/pkg/generated/informers/externalversions/cluster/v1alpha1"
 	informerworkv1aplha2 "github.com/karmada-io/karmada/pkg/generated/informers/externalversions/work/v1alpha2"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -83,6 +85,10 @@ type DispatcherCache struct {
 	// resourceBindingInfos[namespace][name] = target ResourceBindingInfo.
 	resourceBindingInfos map[string]map[string]*api.ResourceBindingInfo
 
+	clusterInformer informerclusterv1alpha1.ClusterInformer
+	// clusters[name] = target Cluster
+	clusters map[string]*clusterv1alpha1.Cluster
+
 	// Its queue for unsuspend the ResourceBinding, when a ResourceBinding finish dispatch,
 	// The Dispatcher will add a task to here, and update the ResourceBinding.spec.Suspend = false.
 	unSuspendRBTaskQueue workqueue.Interface
@@ -135,6 +141,8 @@ func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface 
 
 		resourceBindingInfos: map[string]map[string]*api.ResourceBindingInfo{},
 
+		clusters: map[string]*clusterv1alpha1.Cluster{},
+
 		unSuspendRBTaskQueue: workqueue.New(),
 	}
 
@@ -157,6 +165,12 @@ func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface 
 		AddFunc:    sc.addResourceBinding,
 		UpdateFunc: sc.updateResourceBinding,
 		DeleteFunc: sc.deleteResourceBinding,
+	})
+	sc.clusterInformer = sc.karmadaInformerFactor.Cluster().V1alpha1().Clusters()
+	sc.clusterInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    sc.addRCluster,
+		UpdateFunc: sc.updateCluster,
+		DeleteFunc: sc.deleteCluster,
 	})
 
 	return sc
