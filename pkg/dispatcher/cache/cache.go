@@ -168,7 +168,7 @@ func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface 
 	})
 	sc.clusterInformer = sc.karmadaInformerFactor.Cluster().V1alpha1().Clusters()
 	sc.clusterInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    sc.addRCluster,
+		AddFunc:    sc.addCluster,
 		UpdateFunc: sc.updateCluster,
 		DeleteFunc: sc.deleteCluster,
 	})

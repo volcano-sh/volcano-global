@@ -122,7 +122,7 @@ func (cp *capacityPlugin) buildQueueAttrs(ssn *framework.Session) {
 			}
 			cp.queueOpts[queue.UID] = attr
 		}
-		if rbi.DispatchStatus == api.UnSuspended {
+		if rbi.DispatchStatus != api.Suspended {
 			resRes := volcanoapi.NewResource(rbi.ResourceBinding.Spec.ReplicaRequirements.ResourceRequest).Multi(float64(rbi.ResourceBinding.Spec.Replicas))
 			attr.allocated = attr.allocated.Add(resRes)
 		}
