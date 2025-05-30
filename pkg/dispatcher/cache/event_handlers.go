@@ -19,7 +19,9 @@ package cache
 import (
 	"context"
 
+	clusterv1alpha1 "github.com/karmada-io/karmada/pkg/apis/cluster/v1alpha1"
 	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
+	schedulingv1 "k8s.io/api/scheduling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -39,17 +41,17 @@ func (dc *DispatcherCache) addQueue(obj interface{}) {
 		return
 	}
 
-	// Convert the queue from v1beta1 to v1
-	v1queue := &scheduling.Queue{}
-	if err := scheme.Scheme.Convert(queue, v1queue, nil); err != nil {
-		klog.Errorf("Failed to convert queue from %T to %T", queue, v1queue)
+	// Convert the queue from v1beta1 to internal
+	internalQueue := &scheduling.Queue{}
+	if err := scheme.Scheme.Convert(queue, internalQueue, nil); err != nil {
+		klog.Errorf("Failed to convert queue from %T to %T", queue, internalQueue)
 		return
 	}
 
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
 
-	dc.queues[queue.Name] = schedulingapi.NewQueueInfo(v1queue)
+	dc.setQueue(internalQueue)
 }
 
 func (dc *DispatcherCache) deleteQueue(obj interface{}) {
@@ -69,9 +71,25 @@ func (dc *DispatcherCache) updateQueue(oldObj, newObj interface{}) {
 	if oldQueue == nil || newQueue == nil {
 		return
 	}
+	if oldQueue.ResourceVersion == newQueue.ResourceVersion {
+		return
+	}
 
-	dc.deleteQueue(oldQueue)
-	dc.addQueue(newQueue)
+	// Convert the queue from v1beta1 to internal
+	internalQueue := &scheduling.Queue{}
+	if err := scheme.Scheme.Convert(newQueue, internalQueue, nil); err != nil {
+		klog.Errorf("Failed to convert queue from %T to %T", newQueue, internalQueue)
+		return
+	}
+
+	dc.mutex.Lock()
+	defer dc.mutex.Unlock()
+
+	dc.setQueue(internalQueue)
+}
+
+func (dc *DispatcherCache) setQueue(queue *scheduling.Queue) {
+	dc.queues[queue.Name] = schedulingapi.NewQueueInfo(queue)
 }
 
 func (dc *DispatcherCache) addPriorityClass(obj interface{}) {
@@ -82,12 +100,7 @@ func (dc *DispatcherCache) addPriorityClass(obj interface{}) {
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
 
-	if pc.GlobalDefault {
-		klog.V(3).Infof("Set default PriorityClass to <%s>, Priority <%d>.", pc.Name, pc.Value)
-		dc.defaultPriorityClass = pc
-	}
-
-	dc.priorityClasses[pc.Name] = pc
+	dc.setPriorityClass(pc)
 }
 
 func (dc *DispatcherCache) deletePriorityClass(obj interface{}) {
@@ -95,6 +108,7 @@ func (dc *DispatcherCache) deletePriorityClass(obj interface{}) {
 	if pc == nil {
 		return
 	}
+
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
 
@@ -111,8 +125,27 @@ func (dc *DispatcherCache) updatePriorityClass(oldObj, newObj interface{}) {
 	if oldPc == nil || newPc == nil {
 		return
 	}
-	dc.deletePriorityClass(oldPc)
-	dc.addPriorityClass(newPc)
+	if oldPc.ResourceVersion == newPc.ResourceVersion {
+		return
+	}
+
+	dc.mutex.Lock()
+	defer dc.mutex.Unlock()
+
+	if oldPc.GlobalDefault {
+		klog.V(5).Infof("Delete default PriorityClass <%s>, Priority <%d>.", oldPc.Name, oldPc.Value)
+		dc.defaultPriorityClass = nil
+	}
+
+	dc.setPriorityClass(newPc)
+}
+
+func (dc *DispatcherCache) setPriorityClass(pc *schedulingv1.PriorityClass) {
+	if pc.GlobalDefault {
+		klog.V(3).Infof("Set default PriorityClass to <%s>, Priority <%d>.", pc.Name, pc.Value)
+		dc.defaultPriorityClass = pc
+	}
+	dc.priorityClasses[pc.Name] = pc
 }
 
 func (dc *DispatcherCache) addResourceBinding(obj interface{}) {
@@ -121,6 +154,48 @@ func (dc *DispatcherCache) addResourceBinding(obj interface{}) {
 		return
 	}
 
+	dc.mutex.Lock()
+	defer dc.mutex.Unlock()
+
+	dc.setResourceBinding(rb)
+}
+
+func (dc *DispatcherCache) deleteResourceBinding(obj interface{}) {
+	rb := convertToResourceBinding(obj)
+	if rb == nil {
+		return
+	}
+
+	dc.mutex.Lock()
+	defer dc.mutex.Unlock()
+
+	if dc.resourceBindings[rb.Namespace] == nil {
+		klog.Errorf("Failed to delete ResourceBinding <%s/%s>, the Resourcebinding's "+
+			"Namespace is not in the cache.", rb.Namespace, rb.Name)
+		return
+	} else {
+		delete(dc.resourceBindings[rb.Namespace], rb.Name)
+		delete(dc.resourceBindingInfos[rb.Namespace], rb.Name)
+	}
+}
+
+func (dc *DispatcherCache) updateResourceBinding(oldObj, newObj interface{}) {
+	oldRb := convertToResourceBinding(oldObj)
+	newRb := convertToResourceBinding(newObj)
+	if oldRb == nil || newRb == nil {
+		return
+	}
+	if oldRb.ResourceVersion == newRb.ResourceVersion {
+		return
+	}
+
+	dc.mutex.Lock()
+	defer dc.mutex.Unlock()
+
+	dc.setResourceBinding(newRb)
+}
+
+func (dc *DispatcherCache) setResourceBinding(rb *workv1alpha2.ResourceBinding) {
 	// Check if its workload, skip add to cache if not.
 	isWorkload, newWorkloadFunc, err := workload.TryGetNewWorkloadFunc(rb.Spec.Resource)
 	if err != nil {
@@ -146,10 +221,6 @@ func (dc *DispatcherCache) addResourceBinding(obj interface{}) {
 		return
 	}
 
-	dc.mutex.Lock()
-	defer dc.mutex.Unlock()
-
-	// Add the ResourceBinding to cache.
 	if dc.resourceBindings[rb.Namespace] == nil {
 		dc.resourceBindings[rb.Namespace] = map[string]*workv1alpha2.ResourceBinding{
 			rb.Name: rb,
@@ -182,36 +253,7 @@ func (dc *DispatcherCache) addResourceBinding(obj interface{}) {
 	}
 }
 
-func (dc *DispatcherCache) deleteResourceBinding(obj interface{}) {
-	rb := convertToResourceBinding(obj)
-	if rb == nil {
-		return
-	}
-	dc.mutex.Lock()
-	defer dc.mutex.Unlock()
-
-	if dc.resourceBindings[rb.Namespace] == nil {
-		klog.Errorf("Failed to delete ResourceBinding <%s/%s>, the Resourcebinding's "+
-			"Namespace is not in the cache.", rb.Namespace, rb.Name)
-		return
-	} else {
-		delete(dc.resourceBindings[rb.Namespace], rb.Name)
-		delete(dc.resourceBindingInfos[rb.Namespace], rb.Name)
-	}
-}
-
-func (dc *DispatcherCache) updateResourceBinding(oldObj, newObj interface{}) {
-	oldRb := convertToResourceBinding(oldObj)
-	newRb := convertToResourceBinding(newObj)
-	if oldRb == nil || newRb == nil {
-		return
-	}
-
-	dc.deleteResourceBinding(oldRb)
-	dc.addResourceBinding(newRb)
-}
-
-func (dc *DispatcherCache) addRCluster(obj interface{}) {
+func (dc *DispatcherCache) addCluster(obj interface{}) {
 	cluster := convertToCluster(obj)
 	if cluster == nil {
 		return
@@ -223,7 +265,8 @@ func (dc *DispatcherCache) addRCluster(obj interface{}) {
 
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
-	dc.clusters[cluster.Name] = cluster
+
+	dc.setCluster(cluster)
 }
 
 func (dc *DispatcherCache) deleteCluster(obj interface{}) {
@@ -231,8 +274,10 @@ func (dc *DispatcherCache) deleteCluster(obj interface{}) {
 	if cluster == nil {
 		return
 	}
+
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
+
 	delete(dc.clusters, cluster.Name)
 }
 
@@ -242,9 +287,18 @@ func (dc *DispatcherCache) updateCluster(oldObj, newObj interface{}) {
 	if oldCluster == nil || newCluster == nil {
 		return
 	}
+	if oldCluster.ResourceVersion == newCluster.ResourceVersion {
+		return
+	}
 
-	dc.deleteCluster(oldCluster)
-	dc.addRCluster(newCluster)
+	dc.mutex.Lock()
+	defer dc.mutex.Unlock()
+
+	dc.setCluster(newCluster)
+}
+
+func (dc *DispatcherCache) setCluster(cluster *clusterv1alpha1.Cluster) {
+	dc.clusters[cluster.Name] = cluster
 }
 
 func (dc *DispatcherCache) getResourceFromObjectReference(ref workv1alpha2.ObjectReference) (*unstructured.Unstructured, error) {
