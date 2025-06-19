@@ -123,8 +123,7 @@ func (cp *capacityPlugin) buildQueueAttrs(ssn *framework.Session) {
 			cp.queueOpts[queue.UID] = attr
 		}
 		if rbi.DispatchStatus != api.Suspended {
-			resRes := volcanoapi.NewResource(rbi.ResourceBinding.Spec.ReplicaRequirements.ResourceRequest).Multi(float64(rbi.ResourceBinding.Spec.Replicas))
-			attr.allocated = attr.allocated.Add(resRes)
+			attr.allocated = attr.allocated.Add(rbi.ResReq)
 		}
 	}
 	for _, attr := range cp.queueOpts {
@@ -136,12 +135,11 @@ func (cp *capacityPlugin) buildQueueAttrs(ssn *framework.Session) {
 
 func (cp *capacityPlugin) allocatableFunc(qi *volcanoapi.QueueInfo, candidate *api.ResourceBindingInfo) bool {
 	attr := cp.queueOpts[qi.UID]
-	resReq := volcanoapi.NewResource(candidate.ResourceBinding.Spec.ReplicaRequirements.ResourceRequest).Multi(float64(candidate.ResourceBinding.Spec.Replicas))
-	futureUsed := attr.allocated.Clone().Add(resReq)
-	allocatable := futureUsed.LessEqualWithDimension(attr.realCapability, resReq)
+	futureUsed := attr.allocated.Clone().Add(candidate.ResReq)
+	allocatable := futureUsed.LessEqualWithDimension(attr.realCapability, candidate.ResReq)
 	if !allocatable {
 		klog.V(3).Infof("Queue <%v>: realCapability <%v>, allocated <%v>; Candidate <%v/%v>: resource request <%v>",
-			qi.Name, attr.realCapability, attr.allocated, candidate.ResourceBinding.Namespace, candidate.ResourceBinding.Name, resReq)
+			qi.Name, attr.realCapability, attr.allocated, candidate.ResourceBinding.Namespace, candidate.ResourceBinding.Name, candidate.ResReq)
 	}
 	return allocatable
 }
@@ -153,11 +151,10 @@ func (cp *capacityPlugin) allocateFunc(rbi *api.ResourceBindingInfo) error {
 		klog.Error(err)
 		return err
 	}
-	resReq := volcanoapi.NewResource(rbi.ResourceBinding.Spec.ReplicaRequirements.ResourceRequest).Multi(float64(rbi.ResourceBinding.Spec.Replicas))
-	attr.allocated.Add(resReq)
+	attr.allocated.Add(rbi.ResReq)
 	cp.updateShare(attr)
 	klog.V(4).Infof("Capacity allocateFunc: ResourceBindingInfo <%v/%v>, resreq <%v>,  share <%v>",
-		rbi.ResourceBinding.Namespace, rbi.ResourceBinding.Name, resReq, attr.share)
+		rbi.ResourceBinding.Namespace, rbi.ResourceBinding.Name, rbi.ResReq, attr.share)
 	return nil
 }
 
@@ -168,11 +165,10 @@ func (cp *capacityPlugin) deallocateFunc(rbi *api.ResourceBindingInfo) error {
 		klog.Error(err)
 		return err
 	}
-	resReq := volcanoapi.NewResource(rbi.ResourceBinding.Spec.ReplicaRequirements.ResourceRequest).Multi(float64(rbi.ResourceBinding.Spec.Replicas))
-	attr.allocated.Sub(resReq)
+	attr.allocated.Sub(rbi.ResReq)
 	cp.updateShare(attr)
 	klog.V(4).Infof("Capacity deallocateFunc: ResourceBindingInfo <%v/%v>, resreq <%v>,  share <%v>",
-		rbi.ResourceBinding.Namespace, rbi.ResourceBinding.Name, resReq, attr.share)
+		rbi.ResourceBinding.Namespace, rbi.ResourceBinding.Name, rbi.ResReq, attr.share)
 	return nil
 }
 
