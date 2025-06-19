@@ -29,6 +29,7 @@ import (
 	"volcano.sh/apis/pkg/apis/scheduling"
 	"volcano.sh/apis/pkg/apis/scheduling/scheme"
 	schedulingapi "volcano.sh/volcano/pkg/scheduler/api"
+	volcanoapi "volcano.sh/volcano/pkg/scheduler/api"
 
 	"volcano.sh/volcano-global/pkg/dispatcher/api"
 	"volcano.sh/volcano-global/pkg/utils"
@@ -237,6 +238,13 @@ func (dc *DispatcherCache) setResourceBinding(rb *workv1alpha2.ResourceBinding) 
 		PriorityClassName: workload.PriorityClassName(),
 		DispatchStatus:    api.UnSuspended,
 	}
+
+	resReq := volcanoapi.EmptyResource()
+	if rb.Spec.ReplicaRequirements != nil {
+		resReq = volcanoapi.NewResource(rb.Spec.ReplicaRequirements.ResourceRequest).Multi(float64(rb.Spec.Replicas))
+	}
+	newResourceBindingInfo.ResReq = resReq
+
 	// Currently, our failurePolicy is set to Fail, which ensures that no unexpected ResourceBindings will exist.
 	// When a ResourceBinding is created, it will definitely be updated to Suspend, so we don't need to check the Status,
 	// so rb should be suspended normally.
