@@ -19,6 +19,7 @@ package api
 import (
 	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
 	"k8s.io/apimachinery/pkg/types"
+	volcanoapi "volcano.sh/volcano/pkg/scheduler/api"
 )
 
 type DispatchStatus int16
@@ -35,6 +36,7 @@ type ResourceBindingInfo struct {
 	Queue             string
 	PriorityClassName string
 	DispatchStatus    DispatchStatus
+	ResReq            *volcanoapi.Resource
 
 	// Update it when snapshot.
 	Priority int32
@@ -47,6 +49,7 @@ func (rbi *ResourceBindingInfo) DeepCopy() *ResourceBindingInfo {
 		Queue:             rbi.Queue,
 		PriorityClassName: rbi.PriorityClassName,
 		DispatchStatus:    rbi.DispatchStatus,
+		ResReq:            rbi.ResReq.Clone(),
 
 		Priority: rbi.Priority,
 	}

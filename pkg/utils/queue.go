@@ -22,6 +22,8 @@ import (
 	schedulingv1beta1 "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
 )
 
+const defaultQueue = "default"
+
 // GetObjQueue returns the queue name of an obj.
 // There are 3 ways to get queue name for now:
 // scheduling.volcano.sh/queue-name support only annotation
@@ -39,5 +41,5 @@ func GetObjQueue(obj metav1.Object) string {
 	if _, ok := annotations[schedulingv1beta1.QueueNameAnnotationKey]; ok {
 		return annotations[schedulingv1beta1.QueueNameAnnotationKey]
 	}
-	return ""
+	return defaultQueue
 }
