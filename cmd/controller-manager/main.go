@@ -38,6 +38,7 @@ import (
 
 	_ "volcano.sh/volcano-global/pkg/controller/datadependency"
 	_ "volcano.sh/volcano-global/pkg/controller/datadependency/plugins/amoro"
+	_ "volcano.sh/volcano-global/pkg/controllers"
 	_ "volcano.sh/volcano-global/pkg/dispatcher"
 	_ "volcano.sh/volcano/pkg/controllers/garbagecollector"
 )
