@@ -26,12 +26,13 @@ import (
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	batchv1alpha2 "volcano.sh/apis/pkg/apis/batch/v1alpha2"
+	batchv1alpha1 "volcano.sh/apis/pkg/apis/batch/v1alpha1"
+	trainingv1alpha1 "volcano.sh/apis/pkg/apis/training/v1alpha1"
 	"volcano.sh/volcano/pkg/controllers/framework"
 
 	initializescheme "volcano.sh/volcano-global/pkg/controllers/scheme"
 	// Import all controllers to register them.
-	_ "volcano.sh/volcano-global/pkg/controllers/split"
+	_ "volcano.sh/volcano-global/pkg/controllers/hyperjob"
 )
 
 var (
@@ -41,7 +42,8 @@ var (
 const ControllerName = "controller"
 
 func init() {
-	utilruntime.Must(batchv1alpha2.AddToScheme(scheme))
+	utilruntime.Must(batchv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(trainingv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(policyv1alpha1.AddToScheme(scheme))
 
 	utilruntime.Must(framework.RegisterController(&Controller{}))
@@ -52,11 +54,11 @@ type Controller struct {
 	mgr ctrl.Manager
 }
 
-func (sc *Controller) Name() string {
+func (c *Controller) Name() string {
 	return ControllerName
 }
 
-func (sc *Controller) Initialize(opt *framework.ControllerOption) error {
+func (c *Controller) Initialize(opt *framework.ControllerOption) error {
 	mgr, err := ctrl.NewManager(opt.Config, ctrl.Options{
 		Scheme:         scheme,
 		LeaderElection: false, // LeaderElection is handled by volcano's framework
@@ -68,7 +70,7 @@ func (sc *Controller) Initialize(opt *framework.ControllerOption) error {
 		klog.Errorf("Failed to initalize controller manager framework: %v", err)
 		return err
 	}
-	sc.mgr = mgr
+	c.mgr = mgr
 
 	for name, initFn := range initializescheme.ReconcilerInitializers {
 		//TODO: we can add an enabledSet to filter the reconcilers to be initialized.
@@ -81,12 +83,12 @@ func (sc *Controller) Initialize(opt *framework.ControllerOption) error {
 	return nil
 }
 
-func (sc *Controller) Run(stopCh <-chan struct{}) {
+func (c *Controller) Run(stopCh <-chan struct{}) {
 	klog.Info("Starting shared controller manager")
 	defer klog.Info("Shared controller manager stopped")
 
 	ctx := wait.ContextForChannel(stopCh)
-	if err := sc.mgr.Start(ctx); err != nil {
+	if err := c.mgr.Start(ctx); err != nil {
 		klog.Errorf("Shared controller manager stopped with error: %v", err)
 	}
 }

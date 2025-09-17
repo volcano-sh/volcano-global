@@ -28,6 +28,7 @@ import (
 	cliflag "k8s.io/component-base/cli/flag"
 	componentbaseoptions "k8s.io/component-base/config/options"
 	"k8s.io/klog/v2"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"volcano.sh/volcano/cmd/controller-manager/app"
 	"volcano.sh/volcano/cmd/controller-manager/app/options"
 	"volcano.sh/volcano/pkg/controllers/framework"
@@ -48,6 +49,7 @@ const componentName = "volcano-global-controller-manager"
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	klog.InitFlags(nil)
+	ctrl.SetLogger(klog.Background())
 
 	fs := pflag.CommandLine
 	s := options.NewServerOption()
