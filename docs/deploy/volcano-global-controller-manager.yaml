@@ -24,6 +24,10 @@ spec:
             - --logtostderr
             - --enable-healthz=true
             - --dispatch-period=1s
+            - --controllers=dispatcher
+            # Uncomment the following lines to enable DataDependency features
+            # - --controllers=dispatcher,datadependency-controller
+            # - --feature-gates=DataDependencyAwareness=true
             - -v=5
             - 2>&1
           imagePullPolicy: IfNotPresent

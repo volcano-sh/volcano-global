@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"volcano.sh/volcano/pkg/controllers/framework"
 	schedulingapi "volcano.sh/volcano/pkg/scheduler/api"
 	"volcano.sh/volcano/pkg/scheduler/util"
@@ -31,8 +32,8 @@ import (
 	"volcano.sh/volcano-global/pkg/dispatcher/cache"
 	dispatcherframework "volcano.sh/volcano-global/pkg/dispatcher/framework"
 	"volcano.sh/volcano-global/pkg/dispatcher/options"
-
-	_ "volcano.sh/volcano-global/pkg/dispatcher/plugins"
+	"volcano.sh/volcano-global/pkg/dispatcher/plugins"
+	"volcano.sh/volcano-global/pkg/utils/feature"
 )
 
 func init() {
@@ -61,8 +62,17 @@ func (dispatcher *Dispatcher) Initialize(opt *framework.ControllerOption) error 
 		RestConfig:       opt.Config,
 	}
 
+	// Register data dependency plugin if the feature is enabled
+	if utilfeature.DefaultFeatureGate.Enabled(feature.DataDependencyAwareness) {
+		plugins.RegisterDataDependencyPlugin()
+	}
+
 	dispatcher.dispatchPeriod = options.Opt.DispatchPeriod
-	dispatcher.cache = cache.NewDispatcherCache(cacheOption)
+	cache, err := cache.NewDispatcherCache(cacheOption)
+	if err != nil {
+		return fmt.Errorf("failed to create dispatcher cache: %w", err)
+	}
+	dispatcher.cache = cache
 	return nil
 }
 

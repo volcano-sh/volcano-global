@@ -1,0 +1,18 @@
+apiVersion: datadependency.volcano.sh/v1alpha1
+kind: DataSourceClaim
+metadata:
+  name: dsc-dynamic-binding-test
+  namespace: default
+spec:
+  # Required: underlying data system
+  system: "amoro"
+  # Required: category of the data source within the system
+  dataSourceType: "table"
+  # Required: logical name of the data source to claim
+  dataSourceName: "dc1.db.user"
+  # Required: workload that this claim is associated with
+  workload:
+    apiVersion: "apps/v1"
+    kind: "Deployment"
+    name: "test-app"
+    namespace: "default"

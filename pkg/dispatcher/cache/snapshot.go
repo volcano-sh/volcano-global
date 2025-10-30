@@ -19,9 +19,12 @@ package cache
 import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	schedulingapi "volcano.sh/volcano/pkg/scheduler/api"
 
+	"volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
 	"volcano.sh/volcano-global/pkg/dispatcher/api"
+	"volcano.sh/volcano-global/pkg/utils/feature"
 )
 
 type DispatcherCacheSnapshot struct {
@@ -30,6 +33,10 @@ type DispatcherCacheSnapshot struct {
 	QueueInfos   map[string]*schedulingapi.QueueInfo
 
 	ResourceBindingInfos map[types.UID]*api.ResourceBindingInfo
+
+	// DataSourceClaims maps workload reference key to DataSourceClaim
+	// Key format: "apiVersion/kind/namespace/name"
+	DataSourceClaims map[string]*v1alpha1.DataSourceClaim
 
 	TotalResource *schedulingapi.Resource
 }
@@ -72,6 +79,15 @@ func (dc *DispatcherCache) Snapshot() *DispatcherCacheSnapshot {
 
 			// On the end, we need to copy it.
 			snapshot.ResourceBindingInfos[rbi.ResourceBinding.UID] = rbi.DeepCopy()
+		}
+	}
+
+	// Copy DataSourceClaims if data dependency awareness is enabled
+	if utilfeature.DefaultFeatureGate.Enabled(feature.DataDependencyAwareness) {
+		snapshot.DataSourceClaims = make(map[string]*v1alpha1.DataSourceClaim)
+		for workloadRefKey, dsc := range dc.dataSourceClaims {
+			// Deep copy the DataSourceClaim to avoid data races
+			snapshot.DataSourceClaims[workloadRefKey] = dsc.DeepCopy()
 		}
 	}
 

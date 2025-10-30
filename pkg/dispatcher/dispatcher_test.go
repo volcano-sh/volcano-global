@@ -55,6 +55,10 @@ func TestDispatcherRoundRobin(t *testing.T) {
 				Resource: workv1alpha2.ObjectReference{
 					UID: types.UID(name),
 				},
+				Replicas: 1,
+				ReplicaRequirements: &workv1alpha2.ReplicaRequirements{
+					ResourceRequest: schedulingapi.BuildResourceList("1", "1G"),
+				},
 			},
 		}
 		return &api.ResourceBindingInfo{
@@ -62,6 +66,7 @@ func TestDispatcherRoundRobin(t *testing.T) {
 			ResourceUID:     rb.Spec.Resource.UID,
 			Queue:           queueName,
 			DispatchStatus:  api.Suspended,
+			ResReq:          schedulingapi.NewResource(schedulingapi.BuildResourceList("1", "1G")),
 		}
 	}
 
@@ -132,6 +137,7 @@ func TestDispatcherRoundRobin(t *testing.T) {
 			Queues:               queueInfoMap,
 			ResourceBindingInfos: resourceBindingInfoMap,
 			UnSuspendingOrder:    []types.NamespacedName{},
+			TotalResource:        schedulingapi.NewResource(schedulingapi.BuildResourceList("100", "100G")),
 		}
 
 		// Create a dispatcher
@@ -202,6 +208,7 @@ func TestDispatcherCapacity(t *testing.T) {
 			ResourceUID:     rb.Spec.Resource.UID,
 			Queue:           queueName,
 			DispatchStatus:  dispatchStatus,
+			ResReq:          schedulingapi.NewResource(resReq).Multi(float64(replicas)),
 		}
 	}
 
