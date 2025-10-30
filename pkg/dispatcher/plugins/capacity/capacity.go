@@ -136,7 +136,7 @@ func (cp *capacityPlugin) buildQueueAttrs(ssn *framework.Session) {
 func (cp *capacityPlugin) allocatableFunc(qi *volcanoapi.QueueInfo, candidate *api.ResourceBindingInfo) bool {
 	attr := cp.queueOpts[qi.UID]
 	futureUsed := attr.allocated.Clone().Add(candidate.ResReq)
-	allocatable := futureUsed.LessEqualWithDimension(attr.realCapability, candidate.ResReq)
+	allocatable, _ := futureUsed.LessEqualWithDimensionAndResourcesName(attr.realCapability, candidate.ResReq)
 	if !allocatable {
 		klog.V(3).Infof("Queue <%v>: realCapability <%v>, allocated <%v>; Candidate <%v/%v>: resource request <%v>",
 			qi.Name, attr.realCapability, attr.allocated, candidate.ResourceBinding.Namespace, candidate.ResourceBinding.Name, candidate.ResReq)

@@ -18,6 +18,7 @@ package cache
 
 import (
 	"context"
+	"fmt"
 
 	clusterv1alpha1 "github.com/karmada-io/karmada/pkg/apis/cluster/v1alpha1"
 	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
@@ -31,6 +32,7 @@ import (
 	schedulingapi "volcano.sh/volcano/pkg/scheduler/api"
 	volcanoapi "volcano.sh/volcano/pkg/scheduler/api"
 
+    "volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
 	"volcano.sh/volcano-global/pkg/dispatcher/api"
 	"volcano.sh/volcano-global/pkg/utils"
 	"volcano.sh/volcano-global/pkg/workload"
@@ -321,7 +323,7 @@ func (dc *DispatcherCache) getResourceFromObjectReference(ref workv1alpha2.Objec
 	})
 
 	if err != nil {
-		klog.Errorf("Failed to get resource mapping from reference <%s/%s>, err: %v")
+		klog.Errorf("Failed to get resource mapping from reference <%s/%s>, err: %v", ref.APIVersion, ref.Kind, err)
 		return nil, err
 	}
 
@@ -332,4 +334,60 @@ func (dc *DispatcherCache) getResourceFromObjectReference(ref workv1alpha2.Objec
 		return nil, err
 	}
 	return resource, nil
+}
+
+// DataSourceClaim event handlers
+func (dc *DispatcherCache) addDataSourceClaim(obj interface{}) {
+	dsc := convertToDataSourceClaim(obj)
+	if dsc == nil {
+		return
+	}
+
+	dc.mutex.Lock()
+	defer dc.mutex.Unlock()
+
+	dc.setDataSourceClaim(dsc)
+}
+
+func (dc *DispatcherCache) deleteDataSourceClaim(obj interface{}) {
+	dsc := convertToDataSourceClaim(obj)
+	if dsc == nil {
+		return
+	}
+
+	dc.mutex.Lock()
+	defer dc.mutex.Unlock()
+
+	workloadRef := dc.buildWorkloadRefKey(dsc, dsc.Spec.Workload)
+	delete(dc.dataSourceClaims, workloadRef)
+}
+
+func (dc *DispatcherCache) updateDataSourceClaim(oldObj, newObj interface{}) {
+	oldDsc := convertToDataSourceClaim(oldObj)
+	newDsc := convertToDataSourceClaim(newObj)
+	if oldDsc == nil || newDsc == nil {
+		return
+	}
+	if oldDsc.ResourceVersion == newDsc.ResourceVersion {
+		return
+	}
+
+	dc.mutex.Lock()
+	defer dc.mutex.Unlock()
+
+	dc.setDataSourceClaim(newDsc)
+}
+
+func (dc *DispatcherCache) setDataSourceClaim(dsc *v1alpha1.DataSourceClaim) {
+	workloadRef := dc.buildWorkloadRefKey(dsc, dsc.Spec.Workload)
+	dc.dataSourceClaims[workloadRef] = dsc
+}
+
+// buildWorkloadRefKey constructs a key from WorkloadRef as "apiVersion/kind/namespace/name"
+func (dc *DispatcherCache) buildWorkloadRefKey(dsc *v1alpha1.DataSourceClaim, workload v1alpha1.WorkloadRef) string {
+	namespace := workload.Namespace
+	if namespace == "" {
+		namespace = dsc.Namespace // Use DSC's namespace if workload namespace is not specified
+	}
+	return fmt.Sprintf("%s/%s/%s/%s", workload.APIVersion, workload.Kind, namespace, workload.Name)
 }

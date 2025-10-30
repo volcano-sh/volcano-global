@@ -38,14 +38,17 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	datadependencyv1alpha1 "volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
 	volcanoclientset "volcano.sh/apis/pkg/client/clientset/versioned"
 	volcanoinformer "volcano.sh/apis/pkg/client/informers/externalversions"
-	volcanoinformerfactory "volcano.sh/apis/pkg/client/informers/externalversions"
+	datadependencyinformers "volcano.sh/apis/pkg/client/informers/externalversions/datadependency/v1alpha1"
 	schedulinginformer "volcano.sh/apis/pkg/client/informers/externalversions/scheduling/v1beta1"
 	schedulingapi "volcano.sh/volcano/pkg/scheduler/api"
 
 	"volcano.sh/volcano-global/pkg/dispatcher/api"
 	"volcano.sh/volcano-global/pkg/dispatcher/cache/utils"
+	"volcano.sh/volcano-global/pkg/utils/feature"
 )
 
 type DispatcherCacheOption struct {
@@ -58,15 +61,17 @@ type DispatcherCache struct {
 	mutex     sync.Mutex
 	workerNum uint32
 
-	kubeClient    kubernetes.Interface
-	dynamicClient dynamic.Interface
-	vcClient      volcanoclientset.Interface
-	karmadaClient karmadaclientset.Interface
-	restMapper    meta.RESTMapper
+	kubeClient           kubernetes.Interface
+	dynamicClient        dynamic.Interface
+	vcClient             volcanoclientset.Interface
+	karmadaClient        karmadaclientset.Interface
+	dataDependencyClient volcanoclientset.Interface
+	restMapper           meta.RESTMapper
 
 	informerFactory        informers.SharedInformerFactory
 	volcanoInformerFactory volcanoinformer.SharedInformerFactory
 	karmadaInformerFactor  karmadainformerfactory.SharedInformerFactory
+	dscInformerFactory     volcanoinformer.SharedInformerFactory
 
 	queueInformer schedulinginformer.QueueInformer
 	queues        map[string]*schedulingapi.QueueInfo
@@ -89,28 +94,33 @@ type DispatcherCache struct {
 	// clusters[name] = target Cluster
 	clusters map[string]*clusterv1alpha1.Cluster
 
+	dataSourceClaimInformer datadependencyinformers.DataSourceClaimInformer
+	// dataSourceClaims[WorkloadRef] = target DataSourceClaim
+	// WorkloadRef is constructed as "apiVersion/kind/namespace/name"
+	dataSourceClaims map[string]*datadependencyv1alpha1.DataSourceClaim
+
 	// Its queue for unsuspend the ResourceBinding, when a ResourceBinding finish dispatch,
 	// The Dispatcher will add a task to here, and update the ResourceBinding.spec.Suspend = false.
 	unSuspendRBTaskQueue workqueue.Interface
 }
 
-func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface {
+func NewDispatcherCache(option *DispatcherCacheOption) (DispatcherCacheInterface, error) {
 	config := option.RestConfig
 	kubeClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		panic(fmt.Sprintf("failed to init kubeClient, with err: %v", err))
+		return nil, fmt.Errorf("failed to init kubeClient: %w", err)
 	}
 	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
-		panic(fmt.Sprintf("failed to init dynamicClient, with err: %v", err))
+		return nil, fmt.Errorf("failed to init dynamicClient: %w", err)
 	}
 	volcanoClient, err := volcanoclientset.NewForConfig(config)
 	if err != nil {
-		panic(fmt.Sprintf("failed to init vcClient, with err: %v", err))
+		return nil, fmt.Errorf("failed to init vcClient: %w", err)
 	}
 	karmadaClient, err := karmadaclientset.NewForConfig(config)
 	if err != nil {
-		panic(fmt.Sprintf("failed to init karmadaClient, with err: %v", err))
+		return nil, fmt.Errorf("failed to init karmadaClient: %w", err)
 	}
 
 	// Create the default queue
@@ -118,7 +128,7 @@ func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface 
 
 	grp, err := restmapper.GetAPIGroupResources(kubeClient.Discovery())
 	if err != nil {
-		panic(fmt.Sprintf("failed to init grp, with err: %v", err))
+		return nil, fmt.Errorf("failed to init grp: %w", err)
 	}
 
 	sc := &DispatcherCache{
@@ -131,7 +141,7 @@ func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface 
 		restMapper:    restmapper.NewDiscoveryRESTMapper(grp),
 
 		informerFactory:        informers.NewSharedInformerFactory(kubeClient, 0),
-		volcanoInformerFactory: volcanoinformerfactory.NewSharedInformerFactory(volcanoClient, 0),
+		volcanoInformerFactory: volcanoinformer.NewSharedInformerFactory(volcanoClient, 0),
 		karmadaInformerFactor:  karmadainformerfactory.NewSharedInformerFactory(karmadaClient, 0),
 
 		queues:           map[string]*schedulingapi.QueueInfo{},
@@ -173,7 +183,31 @@ func NewDispatcherCache(option *DispatcherCacheOption) DispatcherCacheInterface 
 		DeleteFunc: sc.deleteCluster,
 	})
 
-	return sc
+	// Initialize DSC client, informer factory and event handlers only if data dependency awareness is enabled
+	if utilfeature.DefaultFeatureGate.Enabled(feature.DataDependencyAwareness) {
+		// Initialize data structures
+		sc.dataSourceClaims = map[string]*datadependencyv1alpha1.DataSourceClaim{}
+
+		// Initialize DSC client
+		dscClient, err := volcanoclientset.NewForConfig(config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to init dscClient: %w", err)
+		}
+		sc.dataDependencyClient = dscClient
+
+		// Initialize DSC informer factory
+		sc.dscInformerFactory = volcanoinformer.NewSharedInformerFactory(dscClient, 0)
+
+		// Initialize DataSourceClaim informer and event handlers
+		sc.dataSourceClaimInformer = sc.dscInformerFactory.Datadependency().V1alpha1().DataSourceClaims()
+		sc.dataSourceClaimInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+			AddFunc:    sc.addDataSourceClaim,
+			UpdateFunc: sc.updateDataSourceClaim,
+			DeleteFunc: sc.deleteDataSourceClaim,
+		})
+	}
+
+	return sc, nil
 }
 
 func (dc *DispatcherCache) Run(stopCh <-chan struct{}) {
@@ -194,6 +228,17 @@ func (dc *DispatcherCache) Run(stopCh <-chan struct{}) {
 	for informerType, ok := range dc.karmadaInformerFactor.WaitForCacheSync(stopCh) {
 		if !ok {
 			klog.Errorf("Caches failed to sync: %v", informerType)
+		}
+	}
+
+	// Start DSC informer factory only if data dependency awareness is enabled
+	// Wait for DSC informer cache sync only if data dependency awareness is enabled
+	if utilfeature.DefaultFeatureGate.Enabled(feature.DataDependencyAwareness) {
+		dc.dscInformerFactory.Start(stopCh)
+		for informerType, ok := range dc.dscInformerFactory.WaitForCacheSync(stopCh) {
+			if !ok {
+				klog.Errorf("Caches failed to sync: %v", informerType)
+			}
 		}
 	}
 

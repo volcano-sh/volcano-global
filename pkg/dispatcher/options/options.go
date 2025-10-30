@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/spf13/pflag"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"volcano.sh/volcano-global/pkg/utils/feature"
 )
 
 var (
@@ -56,4 +58,9 @@ func RegisterDispatcherFlags() *pflag.FlagSet {
 func (o *options) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.DefaultQueueName, "default-queue", DefaultQueue, "The default queue name of the workload")
 	fs.DurationVar(&o.DispatchPeriod, "dispatch-period", DefaultDispatchPeriod, "The period between each scheduling cycle")
+}
+
+// IsDataDependencyAwarenessEnabled checks if the DataDependencyAwareness feature gate is enabled.
+func (o *options) IsDataDependencyAwarenessEnabled() bool {
+	return utilfeature.DefaultFeatureGate.Enabled(feature.DataDependencyAwareness)
 }

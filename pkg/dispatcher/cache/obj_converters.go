@@ -23,6 +23,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	schedulingv1beta1 "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
+    datadependencyv1alpha1 "volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
 )
 
 func convertToQueue(obj interface{}) *schedulingv1beta1.Queue {
@@ -75,4 +76,17 @@ func convertToCluster(obj interface{}) *clusterv1alpha1.Cluster {
 		return nil
 	}
 	return cluster
+}
+
+func convertToDataSourceClaim(obj interface{}) *datadependencyv1alpha1.DataSourceClaim {
+	if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+		obj = tombstone.Obj
+	}
+
+	dsc, ok := obj.(*datadependencyv1alpha1.DataSourceClaim)
+	if !ok {
+		klog.Errorf("Can't Convert obj to *datadependencyv1alpha1.DataSourceClaim, obj: %v", obj)
+		return nil
+	}
+	return dsc
 }
