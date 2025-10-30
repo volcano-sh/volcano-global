@@ -2,7 +2,12 @@
 .idea/
 *.iml
 
+.vscode/
+
 vendor
 _output
 
-_*.DS_Store
+**/.DS_Store
+
+# Test logs and reports
+**/.log
