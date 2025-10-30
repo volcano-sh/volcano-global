@@ -17,11 +17,11 @@ limitations under the License.
 package main
 
 import (
-	"fmt"
-	"os"
-	"runtime"
-	"sort"
-	"time"
+    "fmt"
+    "os"
+    "runtime"
+    "sort"
+    "time"
 
 	"github.com/spf13/pflag"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
@@ -36,6 +36,8 @@ import (
 
 	dispatcheroptions "volcano.sh/volcano-global/pkg/dispatcher/options"
 
+	_ "volcano.sh/volcano-global/pkg/controller/datadependency"
+	_ "volcano.sh/volcano-global/pkg/controller/datadependency/plugins/amoro"
 	_ "volcano.sh/volcano-global/pkg/dispatcher"
 	_ "volcano.sh/volcano/pkg/controllers/garbagecollector"
 )
@@ -65,14 +67,14 @@ func main() {
 	commonutil.LeaderElectionDefault(&s.LeaderElection)
 	s.LeaderElection.ResourceName = componentName
 	componentbaseoptions.BindLeaderElectionFlags(&s.LeaderElection, fs)
-	// add dispatcher flag.
-	fs.AddFlagSet(dispatcheroptions.RegisterDispatcherFlags())
-	cliflag.InitFlags()
+    // add dispatcher flag.
+    fs.AddFlagSet(dispatcheroptions.RegisterDispatcherFlags())
+    cliflag.InitFlags()
 
-	if s.PrintVersion {
-		version.PrintVersionAndExit()
-		return
-	}
+    if s.PrintVersion {
+        version.PrintVersionAndExit()
+        return
+    }
 	if err := s.CheckOptionOrDie(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
