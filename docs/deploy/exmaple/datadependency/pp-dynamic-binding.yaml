@@ -1,0 +1,19 @@
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: test-app
+  namespace: default
+spec:
+  # Select DataSourceClaim resources
+  resourceSelectors:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: test-app
+  # Propagate to specified clusters
+  placement:
+    clusterAffinity:
+      clusterNames:
+    # Replica scheduling strategy
+    replicaScheduling:
+      replicaDivisionPreference: Aggregated
+      replicaSchedulingType: Divided
