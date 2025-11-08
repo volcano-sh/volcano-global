@@ -11,3 +11,4 @@ _output
 
 # Test logs and reports
 **/.log
+coverage.txt

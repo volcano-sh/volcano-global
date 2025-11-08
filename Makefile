@@ -72,6 +72,9 @@ images:
 		docker buildx build -t "${IMAGE_PREFIX}/volcano-global-$$name:$(TAG)" . -f ./installer/dockerfile/$$name/Dockerfile --output=type=${BUILDX_OUTPUT_TYPE} --platform ${DOCKER_PLATFORMS} --build-arg APK_MIRROR=${APK_MIRROR}; \
 	done
 
+unit-test:
+	go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+
 clean:
 	rm -rf _output/
 	rm -f *.log
