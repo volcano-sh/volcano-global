@@ -4,7 +4,6 @@ on:
   pull_request:
     branches:
       - main
-      - master
 
 jobs:
   unit-test:
@@ -33,12 +32,4 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Run unit tests
-        run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v5
-        with:
-          files: ./coverage.txt
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
+        run: make unit-test
