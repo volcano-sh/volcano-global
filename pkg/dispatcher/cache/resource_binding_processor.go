@@ -18,14 +18,14 @@ package cache
 
 import (
 	"context"
-	"encoding/json"
-
+	"github.com/karmada-io/karmada/pkg/apis/policy/v1alpha1"
 	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
 	"gomodules.xyz/jsonpatch/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/klog/v2"
-
+	"k8s.io/utils/ptr"
 	"volcano.sh/volcano-global/pkg/dispatcher/api"
 )
 
@@ -93,11 +93,47 @@ func (dc *DispatcherCache) unSuspendResourceBinding(rb *workv1alpha2.ResourceBin
 }
 
 func (dc *DispatcherCache) patchUnSuspendResourceBinding(rb *workv1alpha2.ResourceBinding) error {
-	patchBytes, err := json.Marshal([]jsonpatch.Operation{
-		{Operation: "add", Path: "/spec/suspension", Value: map[string]interface{}{
-			"scheduling": false,
-		}},
-	})
+	dispatchContent := &api.DispatchContent{
+		ResourceRequest: rb.Spec.ReplicaRequirements.ResourceRequest,
+	}
+	for _, cluster := range rb.Spec.Clusters {
+		dispatchContent.Replicas += cluster.Replicas
+	}
+	content, err := json.Marshal(dispatchContent)
+	if err != nil {
+		return err
+	}
+	newRb := rb.DeepCopy()
+	if newRb.Spec.Suspension != nil {
+		newRb.Spec.Suspension.Dispatching = ptr.To(false)
+	} else {
+		newRb.Spec.Suspension = &workv1alpha2.Suspension{
+			Suspension: v1alpha1.Suspension{
+				Dispatching: ptr.To(false),
+			},
+		}
+	}
+	if newRb.Annotations != nil {
+		newRb.Annotations[api.LastDispatchedContentAnnotationKey] = string(content)
+	} else {
+		newRb.Annotations = map[string]string{
+			api.LastDispatchedContentAnnotationKey: string(content),
+		}
+	}
+
+	oldRbBytes, err := json.Marshal(rb)
+	if err != nil {
+		return err
+	}
+	newRbBytes, err := json.Marshal(newRb)
+	if err != nil {
+		return err
+	}
+	patches, err := jsonpatch.CreatePatch(oldRbBytes, newRbBytes)
+	if err != nil {
+		return err
+	}
+	patchBytes, err := json.Marshal(patches)
 	if err != nil {
 		return err
 	}
