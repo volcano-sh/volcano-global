@@ -1,0 +1,40 @@
+{{- if .Values.controllerManager.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: volcano-global-controller-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: volcano-global-controller-manager
+spec:
+  replicas: {{ .Values.controllerManager.replicas }}
+  selector:
+    matchLabels:
+      app: volcano-global-controller-manager
+  template:
+    metadata:
+      labels:
+        app: volcano-global-controller-manager
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: volcano-global-controller-manager
+          image: "{{ .Values.controllerManager.image.repository }}:{{ .Values.controllerManager.image.tag }}"
+          imagePullPolicy: {{ .Values.controllerManager.image.pullPolicy }}
+          args:
+            - --kubeconfig={{ .Values.controllerManager.kubeconfigPath }}
+            - --leader-elect={{ .Values.controllerManager.leaderElection }}
+            - --dispatch-period={{ .Values.controllerManager.dispatchPeriod }}
+            - --logtostderr
+            - --enable-healthz=true
+            - --controllers=dispatcher
+            - -v=5
+          volumeMounts:
+            - name: webhook-config
+              mountPath: /etc/kubeconfig
+              readOnly: true
+      volumes:
+        - name: webhook-config
+          secret:
+            secretName: karmada-webhook-config
+{{- end }}

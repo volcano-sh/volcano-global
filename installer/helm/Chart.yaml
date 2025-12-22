@@ -1,0 +1,14 @@
+apiVersion: v2
+name: volcano-global
+description: A Helm chart for Volcano Global - Multi-cluster AI/ML workload scheduling
+type: application
+version: 0.2.0
+appVersion: "v1.10.0"
+home: https://volcano.sh
+sources:
+  - https://github.com/volcano-sh/volcano-global
+dependencies:
+  - name: volcano-global-host
+    condition: volcano-global-host.enabled
+  - name: volcano-global-apiserver
+    condition: volcano-global-apiserver.enabled

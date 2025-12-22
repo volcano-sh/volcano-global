@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: volcano-global-admission-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: volcano-global-admission-init
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      serviceAccountName: volcano-global-webhook-init-sa
+      restartPolicy: Never
+      containers:
+        - name: webhook-secret-creat
+          image: "{{ .Values.webhookInit.image.repository }}:{{ .Values.webhookInit.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          command:
+          - /bin/sh
+          - -c
+          - |
+            echo "Checking if secret 'volcano-global-webhook-cert' exists ..."
+            if kubectl get secret volcano-global-webhook-cert -n {{ .Release.Namespace }} >/dev/null 2>&1; then
+              echo "Secret 'volcano-global-webhook-cert' exists, exit"
+              exit 0
+            fi
+
+            ./gen-admission-secret.sh --service "volcano-global-webhook" --namespace {{ .Release.Namespace }} --secret  "volcano-global-webhook-cert"
+            echo "Secret 'volcano-global-webhook-cert' created"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: volcano-global-admission-delete
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-delete-policy": hook-succeeded
+    "helm.sh/hook-weight": "5"
+spec:
+  template:
+    spec:
+      serviceAccountName: volcano-global-webhook-init-sa
+      restartPolicy: Never
+      containers:
+      - name: webhook-secret-delete
+        image: "{{ .Values.webhookDeInit.image.repository }}:{{ .Values.webhookDeInit.image.tag }}"
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/bash"]
+        args:
+          - -c
+          - |
+            /usr/local/bin/kubectl delete secret volcano-global-webhook-cert -n {{ .Release.Namespace }}
+            /usr/local/bin/kubectl delete service volcano-global-webhook -n {{ .Release.Namespace }}
+
+            echo "Secret 'volcano-global-webhook-cert' deleted"

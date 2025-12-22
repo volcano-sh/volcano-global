@@ -1,0 +1,9 @@
+# volcano-global-host configuration
+volcano-global-host:
+  enabled: true
+  # Override values here if needed
+
+# volcano-global-apiserver configuration
+volcano-global-apiserver:
+  enabled: true
+  # Override values here if needed
