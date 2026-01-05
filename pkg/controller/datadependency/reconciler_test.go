@@ -38,7 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
-    "volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
+	"volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
 )
 
 func TestReconcileFunction(t *testing.T) {
@@ -1214,6 +1214,21 @@ func TestReconcileFunction(t *testing.T) {
 		// Run reconcile - should trigger handleBound branch and RB rescheduling
 		err = controller.Reconcile(expectedKey)
 		assert.NoError(t, err, "Reconcile should not return an error")
+
+		// Wait for ResourceBinding to be updated
+		err = wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
+			updatedRB, getErr := controller.karmadaClient.WorkV1alpha2().ResourceBindings(rb.Namespace).Get(ctx, rb.Name, metav1.GetOptions{})
+			if getErr != nil {
+				return false, getErr
+			}
+			// Check if ExcludedClustersAnnotation has been updated to cluster-loc-1
+			if updatedRB.Annotations == nil {
+				return false, nil
+			}
+			excludedAnnotation, exists := updatedRB.Annotations[ExcludedClustersAnnotation]
+			return exists && excludedAnnotation == "cluster-loc-1", nil
+		})
+		assert.NoError(t, err, "ResourceBinding should be updated with new excluded clusters")
 
 		// Verify that the ResourceBinding was updated with new placement affinity
 		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings(rb.Namespace).Get(ctx, rb.Name, metav1.GetOptions{})
