@@ -32,7 +32,7 @@ import (
 	schedulingapi "volcano.sh/volcano/pkg/scheduler/api"
 	volcanoapi "volcano.sh/volcano/pkg/scheduler/api"
 
-    "volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
+	"volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
 	"volcano.sh/volcano-global/pkg/dispatcher/api"
 	"volcano.sh/volcano-global/pkg/utils"
 	"volcano.sh/volcano-global/pkg/workload"
@@ -243,14 +243,16 @@ func (dc *DispatcherCache) setResourceBinding(rb *workv1alpha2.ResourceBinding) 
 
 	resReq := volcanoapi.EmptyResource()
 	if rb.Spec.ReplicaRequirements != nil {
-		resReq = volcanoapi.NewResource(rb.Spec.ReplicaRequirements.ResourceRequest).Multi(float64(rb.Spec.Replicas))
+		for _, cluster := range rb.Spec.Clusters {
+			resReq.Add(volcanoapi.NewResource(rb.Spec.ReplicaRequirements.ResourceRequest).Multi(float64(cluster.Replicas)))
+		}
 	}
 	newResourceBindingInfo.ResReq = resReq
 
 	// Currently, our failurePolicy is set to Fail, which ensures that no unexpected ResourceBindings will exist.
 	// When a ResourceBinding is created, it will definitely be updated to Suspend, so we don't need to check the Status,
 	// so rb should be suspended normally.
-	if rb.Spec.SchedulingSuspended() {
+	if rb.Spec.Suspension != nil && rb.Spec.Suspension.Dispatching != nil && *rb.Spec.Suspension.Dispatching {
 		newResourceBindingInfo.DispatchStatus = api.Suspended
 	}
 
