@@ -38,7 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
-    "volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
+	"volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
 )
 
 func TestReconcileFunction(t *testing.T) {
@@ -1188,6 +1188,13 @@ func TestReconcileFunction(t *testing.T) {
 		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings(rb.Namespace).Create(ctx, rb, metav1.CreateOptions{})
 		assert.NoError(t, err, "Failed to create ResourceBinding")
 
+		// Wait for the ResourceBinding to be synced in the cache
+		err = wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
+			_, getErr := controller.rbLister.ResourceBindings(rb.Namespace).Get(rb.Name)
+			return getErr == nil, nil
+		})
+		assert.NoError(t, err, "ResourceBinding should be synced in cache")
+
 		// Simulate DS Locality change by updating the DataSource
 		updatedDS := originalDS.DeepCopy()
 		updatedDS.Spec.Locality.ClusterNames = []string{"cluster-loc-2", "cluster-loc-3"} // Changed from cluster-loc-1 to cluster-loc-3
@@ -1214,7 +1221,6 @@ func TestReconcileFunction(t *testing.T) {
 		// Run reconcile - should trigger handleBound branch and RB rescheduling
 		err = controller.Reconcile(expectedKey)
 		assert.NoError(t, err, "Reconcile should not return an error")
-
 		// Verify that the ResourceBinding was updated with new placement affinity
 		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings(rb.Namespace).Get(ctx, rb.Name, metav1.GetOptions{})
 		assert.NoError(t, err, "Failed to get updated ResourceBinding")
