@@ -67,7 +67,7 @@ func (c *Controller) Initialize(opt *framework.ControllerOption) error {
 		},
 	})
 	if err != nil {
-		klog.Errorf("Failed to initalize controller manager framework: %v", err)
+		klog.Errorf("Failed to initialize controller manager framework: %v", err)
 		return err
 	}
 	c.mgr = mgr
@@ -89,6 +89,6 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 
 	ctx := wait.ContextForChannel(stopCh)
 	if err := c.mgr.Start(ctx); err != nil {
-		klog.Errorf("Shared controller manager stopped with error: %v", err)
+		klog.Fatalf("Shared controller manager stopped with error: %v", err)
 	}
 }

@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	batchv1alpha1 "volcano.sh/apis/pkg/apis/batch/v1alpha1"
@@ -46,7 +47,9 @@ func setupTestController() (*HyperJobController, client.Client) {
 		WithScheme(scheme).
 		WithStatusSubresource(&trainingv1alpha1.HyperJob{}).
 		Build()
-	controller := NewHyperJobController(fakeClient, scheme)
+
+	eventRecorder := record.NewFakeRecorder(100)
+	controller := NewHyperJobController(fakeClient, scheme, eventRecorder)
 
 	return controller, fakeClient
 }
@@ -57,6 +60,7 @@ func createTestHyperJob(name, namespace string, replicatedJobs []trainingv1alpha
 			Name:       name,
 			Namespace:  namespace,
 			Generation: 1,
+			UID:        "12345678-1234-1234-1234-123456789abc",
 		},
 		Spec: trainingv1alpha1.HyperJobSpec{
 			ReplicatedJobs: replicatedJobs,
@@ -112,13 +116,16 @@ func createTestVCJob(name, namespace, hyperJobName, replicatedJobName string, st
 
 // Helper to create expected VCJob
 func expectedVCJob(name, namespace, hyperJobName, replicatedJobName string, spec batchv1alpha1.JobSpec) *batchv1alpha1.Job {
+	templateSpecHash := ComputeVCJobTemplateSpecHash(&spec)
+
 	return &batchv1alpha1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 			Labels: map[string]string{
-				HyperJobNameLabelKey:      hyperJobName,
-				ReplicatedJobNameLabelKey: replicatedJobName,
+				HyperJobNameLabelKey:          hyperJobName,
+				ReplicatedJobNameLabelKey:     replicatedJobName,
+				VCJobTemplateSpecHashLabelKey: templateSpecHash,
 			},
 		},
 		Spec: spec,
@@ -136,6 +143,7 @@ func expectedPP(name, namespace, hyperJobName string, clusterNames []string) *po
 			},
 		},
 		Spec: policyv1alpha1.PropagationSpec{
+			PropagateDeps: true,
 			ResourceSelectors: []policyv1alpha1.ResourceSelector{
 				{
 					APIVersion: batchv1alpha1.SchemeGroupVersion.String(),
@@ -164,6 +172,9 @@ func expectedPP(name, namespace, hyperJobName string, clusterNames []string) *po
 			ClusterNames: clusterNames,
 		}
 	}
+
+	ppSpecHash := ComputePPSpecHash(&pp.Spec)
+	pp.Labels[PPSpecHashLabelKey] = ppSpecHash
 
 	return pp
 }
@@ -305,12 +316,9 @@ func TestSyncVCJobAndPP(t *testing.T) {
 
 			for _, vcjob := range tt.existingVCJobs {
 				// We need to manually set these because the fake client doesn't run the controller logic
-				// to add owner references and annotations for existing objects.
+				// to add owner references for existing objects.
 				vcjob.OwnerReferences = []metav1.OwnerReference{
 					*metav1.NewControllerRef(tt.hyperJob, trainingv1alpha1.SchemeGroupVersion.WithKind("HyperJob")),
-				}
-				vcjob.Annotations = map[string]string{
-					VCJobTemplateSpecHashAnnotation: ComputeVCJobTemplateSpecHash(&vcjob.Spec),
 				}
 				err = fakeClient.Create(ctx, vcjob)
 				assert.NoError(t, err)
@@ -318,9 +326,6 @@ func TestSyncVCJobAndPP(t *testing.T) {
 			for _, pp := range tt.existingPPs {
 				pp.OwnerReferences = []metav1.OwnerReference{
 					*metav1.NewControllerRef(tt.hyperJob, trainingv1alpha1.SchemeGroupVersion.WithKind("HyperJob")),
-				}
-				pp.Annotations = map[string]string{
-					PPSpecHashAnnotation: ComputePPSpecHash(&pp.Spec),
 				}
 				err = fakeClient.Create(ctx, pp)
 				assert.NoError(t, err)
@@ -340,21 +345,15 @@ func TestSyncVCJobAndPP(t *testing.T) {
 				actualVCJobs[i] = &vcJobList.Items[i]
 			}
 
-			// Manually add controller-managed fields to our expected objects for a fair comparison
+			// Manually add controller-managed fields to our expected objects for a fair comparison.
 			for _, vcjob := range tt.expectedVCJobs {
 				vcjob.OwnerReferences = []metav1.OwnerReference{
 					*metav1.NewControllerRef(tt.hyperJob, trainingv1alpha1.SchemeGroupVersion.WithKind("HyperJob")),
-				}
-				vcjob.Annotations = map[string]string{
-					VCJobTemplateSpecHashAnnotation: ComputeVCJobTemplateSpecHash(&vcjob.Spec),
 				}
 			}
 			for _, pp := range tt.expectedPPs {
 				pp.OwnerReferences = []metav1.OwnerReference{
 					*metav1.NewControllerRef(tt.hyperJob, trainingv1alpha1.SchemeGroupVersion.WithKind("HyperJob")),
-				}
-				pp.Annotations = map[string]string{
-					PPSpecHashAnnotation: ComputePPSpecHash(&pp.Spec),
 				}
 			}
 

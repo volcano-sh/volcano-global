@@ -24,6 +24,7 @@ spec:
             - --logtostderr
             - --enable-healthz=true
             - --healthz-address=$(MY_POD_IP):11251
+            - --listen-address=$(MY_POD_IP):9090
             - --dispatch-period=1s
             - --controllers=dispatcher
             # Uncomment the following lines to enable DataDependency features

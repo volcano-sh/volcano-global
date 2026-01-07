@@ -22,16 +22,11 @@ import (
 	"reflect"
 
 	policyv1alpha1 "github.com/karmada-io/karmada/pkg/apis/policy/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 	hashutil "k8s.io/kubernetes/pkg/util/hash"
 	batchv1alpha1 "volcano.sh/apis/pkg/apis/batch/v1alpha1"
 	trainingv1alpha1 "volcano.sh/apis/pkg/apis/training/v1alpha1"
-)
-
-const (
-	// Annotation for storing the hash of the user's original vcjob templateSpec/ppSpec
-	VCJobTemplateSpecHashAnnotation = "volcano.sh/vcjob-template-spec-hash"
-	PPSpecHashAnnotation            = "volcano.sh/pp-spec-hash"
 )
 
 // Conditions list
@@ -52,23 +47,23 @@ const (
 
 // ComputeVCJobTemplateSpecHash computes the hash value of the vcjob templateSpec.
 func ComputeVCJobTemplateSpecHash(templateSpec *batchv1alpha1.JobSpec) string {
-	templateSpecHasher := fnv.New32a()
+	templateSpecHasher := fnv.New64a()
 	hashutil.DeepHashObject(templateSpecHasher, *templateSpec)
-	return rand.SafeEncodeString(fmt.Sprint(templateSpecHasher.Sum32()))
+	return rand.SafeEncodeString(fmt.Sprintf("%08x", templateSpecHasher.Sum64()))
 }
 
 // ComputePPSpecHash computes the hash value of the propagation policy spec.
 func ComputePPSpecHash(ppSpec *policyv1alpha1.PropagationSpec) string {
-	ppSpecHasher := fnv.New32a()
+	ppSpecHasher := fnv.New64a()
 	hashutil.DeepHashObject(ppSpecHasher, *ppSpec)
-	return rand.SafeEncodeString(fmt.Sprint(ppSpecHasher.Sum32()))
+	return rand.SafeEncodeString(fmt.Sprintf("%08x", ppSpecHasher.Sum64()))
 }
 
 // IsVCJobTemplateSpecChanged checks if the vcjob templateSpec has changed by comparing the hash values.
 func IsVCJobTemplateSpecChanged(replicatedJob *trainingv1alpha1.ReplicatedJob, existingVCJob *batchv1alpha1.Job) bool {
 	currentHash := ComputeVCJobTemplateSpecHash(&replicatedJob.TemplateSpec)
 
-	previousHash, exists := existingVCJob.Annotations[VCJobTemplateSpecHashAnnotation]
+	previousHash, exists := existingVCJob.Labels[VCJobTemplateSpecHashLabelKey]
 	if !exists {
 		return true
 	}
@@ -80,7 +75,7 @@ func IsVCJobTemplateSpecChanged(replicatedJob *trainingv1alpha1.ReplicatedJob, e
 func IsPPSpecChanged(desiredPP *policyv1alpha1.PropagationPolicy, existingPP *policyv1alpha1.PropagationPolicy) bool {
 	currentHash := ComputePPSpecHash(&desiredPP.Spec)
 
-	previousHash, exists := existingPP.Annotations[PPSpecHashAnnotation]
+	previousHash, exists := existingPP.Labels[PPSpecHashLabelKey]
 	if !exists {
 		return true
 	}
@@ -148,4 +143,18 @@ func PreserveDefaultsForVCJobSpec(desired, existing *batchv1alpha1.JobSpec) {
 			}
 		}
 	}
+}
+
+// IsHyperJobInTerminalState checks if the HyperJob is in a terminal state (Completed or Failed).
+func IsHyperJobInTerminalState(hyperJob *trainingv1alpha1.HyperJob) bool {
+	for _, condition := range hyperJob.Status.Conditions {
+		if condition.Type == HyperJobConditionCompleted && condition.Status == metav1.ConditionTrue {
+			return true
+		}
+		if condition.Type == HyperJobConditionFailed && condition.Status == metav1.ConditionTrue {
+			return true
+		}
+	}
+
+	return false
 }
