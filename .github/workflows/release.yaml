@@ -54,14 +54,23 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and Push to Docker Hub
-        run: |
-          make TAG=${{ env.TAG }} \
-               RELEASE_VER=${{ env.RELEASE_VER }} \
-               IMAGE_PREFIX=volcanosh \
-               DOCKER_PLATFORMS="linux/amd64,linux/arm64" \
-               BUILDX_OUTPUT_TYPE=registry \
-               images
+      - name: Build and Push controller-manager to Docker Hub
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./installer/dockerfile/controller-manager/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: volcanosh/volcano-global-controller-manager:${{ env.TAG }}
+
+      - name: Build and Push webhook-manager to Docker Hub
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./installer/dockerfile/webhook-manager/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: volcanosh/volcano-global-webhook-manager:${{ env.TAG }}
 
       - name: Logout from registries
         if: always()
