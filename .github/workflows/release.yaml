@@ -1,0 +1,81 @@
+name: image release
+on:
+  # Automatically push the image when merging to main branch
+  push:
+    branches:
+      - main
+    # Automatically push the image when releasing the version
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    env:
+      GOPATH: /home/runner/work/${{ github.repository }}
+    steps:
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: ./src/github.com/${{ github.repository }}
+
+      - name: Get tag or branch name
+        run: |
+          echo "TAG=${{ github.ref_name }}" >> $GITHUB_ENV
+          echo "RELEASE_VER=${{ github.ref_name }}" >> $GITHUB_ENV
+          # Downcase the repository owner for GHCR / Docker compatibility
+          OWNER="${{ github.repository_owner }}"
+          echo "REPO_OWNER=${OWNER,,}" >> $GITHUB_ENV
+
+      - name: Update tag and release_ver
+        if: ${{ github.ref_name == 'main' }}
+        run: |
+          echo "TAG=latest" >> $GITHUB_ENV
+          echo "RELEASE_VER=latest" >> $GITHUB_ENV
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+
+      - name: Run unit tests
+        run: |
+          make unit-test
+        working-directory: ./src/github.com/${{ github.repository }}
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3 
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push to Docker Hub
+        run: docker buildx create --use && make TAG=${{ env.TAG }} RELEASE_VER=${{ env.RELEASE_VER }} IMAGE_PREFIX=volcanosh DOCKER_PLATFORMS="linux/amd64,linux/arm64" BUILDX_OUTPUT_TYPE=registry images
+        working-directory: ./src/github.com/${{ github.repository }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push to GitHub Container Registry
+        run: make TAG=${{ env.TAG }} RELEASE_VER=${{ env.RELEASE_VER }} IMAGE_PREFIX=ghcr.io/${{ env.REPO_OWNER }} DOCKER_PLATFORMS="linux/amd64,linux/arm64" BUILDX_OUTPUT_TYPE=registry images
+        working-directory: ./src/github.com/${{ github.repository }}
+
+      - name: Logout from registries
+        if: always()
+        run: |
+          docker logout
+          docker logout ghcr.io
