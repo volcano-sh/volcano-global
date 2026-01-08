@@ -43,10 +43,13 @@ jobs:
           echo "TAG=latest" >> $GITHUB_ENV
           echo "RELEASE_VER=latest" >> $GITHUB_ENV
 
-      - uses: actions/cache@v4
+      - name: Cache Go modules
+        uses: actions/cache@v4
         with:
           path: ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
       - name: Run unit tests
         run: |
@@ -60,7 +63,14 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and Push to Docker Hub
-        run: docker buildx create --use && make TAG=${{ env.TAG }} RELEASE_VER=${{ env.RELEASE_VER }} IMAGE_PREFIX=volcanosh DOCKER_PLATFORMS="linux/amd64,linux/arm64" BUILDX_OUTPUT_TYPE=registry images
+        run: |
+          docker buildx create --use
+          make TAG=${{ env.TAG }} \
+               RELEASE_VER=${{ env.RELEASE_VER }} \
+               IMAGE_PREFIX=volcanosh \
+               DOCKER_PLATFORMS="linux/amd64,linux/arm64" \
+               BUILDX_OUTPUT_TYPE=registry \
+               images
         working-directory: ./src/github.com/${{ github.repository }}
 
       - name: Login to GitHub Container Registry
@@ -71,7 +81,13 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push to GitHub Container Registry
-        run: make TAG=${{ env.TAG }} RELEASE_VER=${{ env.RELEASE_VER }} IMAGE_PREFIX=ghcr.io/${{ env.REPO_OWNER }} DOCKER_PLATFORMS="linux/amd64,linux/arm64" BUILDX_OUTPUT_TYPE=registry images
+        run: |
+          make TAG=${{ env.TAG }} \
+               RELEASE_VER=${{ env.RELEASE_VER }} \
+               IMAGE_PREFIX=ghcr.io/${{ env.REPO_OWNER }} \
+               DOCKER_PLATFORMS="linux/amd64,linux/arm64" \
+               BUILDX_OUTPUT_TYPE=registry \
+               images
         working-directory: ./src/github.com/${{ github.repository }}
 
       - name: Logout from registries
