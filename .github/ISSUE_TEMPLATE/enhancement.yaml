@@ -63,5 +63,5 @@ body:
       options:
         - label: This feature requires design or user documentation changes.
           required: false
-        - label: If documentation changes are required, I will ensure the relevant documents are updated in the volcano-global repository.
+        - label: If documentation changes are required, I will open a follow-up issue or PR to track the update.
           required: false
