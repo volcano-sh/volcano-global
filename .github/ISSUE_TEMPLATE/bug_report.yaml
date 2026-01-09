@@ -1,5 +1,5 @@
 name: Bug report
-description: Create a bug report to help improve volcano
+description: Create a bug report to help improve volcano-global
 labels: kind/bug
 body:
   - type: markdown
@@ -10,7 +10,7 @@ body:
         repository. If there is a duplicate, please close your issue and add a comment
         to the existing issue instead.
 
-        If you're looking for a help then check our [Slack Channel](https://cloud-native.slack.com/messages/volcano) or have a look at our [dev mailing](https://groups.google.com/forum/#!forum/volcano-sh) 
+        If you're looking for help then check our [Slack Channel](https://cloud-native.slack.com/messages/volcano) or have a look at our [dev mailing](https://groups.google.com/forum/#!forum/volcano-sh) 
 
   - type: textarea
     attributes:
@@ -36,17 +36,50 @@ body:
 
   - type: input
     attributes:
-      label: What version of Volcano are you using?
-      placeholder: Volcano image tag
+      label: What version of Volcano-global are you using?
+      placeholder: Volcano-global image tag or commit SHA
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: What version of Karmada are you using?
+      placeholder: Karmada version
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: Deployment Type
+      description: How is volcano-global deployed?
+      options:
+        - Single cluster with Karmada
+        - Multi-cluster setup
+        - Other (please specify in additional info)
     validations:
       required: true
 
   - type: textarea
     attributes:
+      label: Multi-cluster Environment Details
+      description: |
+        If applicable, provide details about your multi-cluster setup:
+        - Number of member clusters
+        - Cluster topology
+        - Network setup between clusters
+      placeholder: |
+        - 3 member clusters (cluster-1, cluster-2, cluster-3)
+        - All clusters in same region/different regions
+        - Network: Direct connectivity / VPN / etc.
+
+  - type: textarea
+    attributes:
       label: Any other relevant information
       description: |
-        Kubernetes version, OS configuration, OS/Kernel version, etc.
+        Kubernetes version (control plane and member clusters), OS configuration, OS/Kernel version, etc.
         Use the following commands:
         $ kubectl version
         $ cat /etc/os-release
         $ uname -a
+        
+        For multi-cluster issues, provide details from both control plane and member clusters.

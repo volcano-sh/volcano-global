@@ -1,5 +1,5 @@
 name: Enhancement
-description: Suggest an idea for volcano
+description: Suggest an idea for volcano-global
 labels: kind/feature
 body:
   - type: textarea
@@ -7,6 +7,22 @@ body:
       label: What is the problem you're trying to solve
       description: |
         A clear and concise description of what the problem is.
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: Feature Category
+      description: Which area does this enhancement relate to?
+      options:
+        - Multi-cluster scheduling
+        - Queue management
+        - AI/ML workload support
+        - Bigdata workload support
+        - Karmada integration
+        - Single/multiple template tasks
+        - Performance optimization
+        - Other
     validations:
       required: true
 
@@ -18,11 +34,26 @@ body:
     validations:
       required: true
 
+  - type: checkboxes
+    attributes:
+      label: Impact Scope
+      description: Which components will be affected?
+      options:
+        - label: Scheduler
+        - label: Controller
+        - label: Queue management
+        - label: Multi-cluster coordination
+        - label: API/CRDs
+        - label: CLI tools
+
   - type: textarea
     attributes:
       label: Additional context
       description: |
         Add any other context about the feature request here.
+        - Use cases
+        - Expected behavior in multi-cluster scenarios
+        - Integration with Karmada/Volcano features
 
   - type: checkboxes
     attributes:
@@ -32,5 +63,5 @@ body:
       options:
         - label: This feature requires design or user documentation changes.
           required: false
-        - label: If documentation changes are required, I will ensure the relevant documents are updated and published to the Volcano official website (https://volcano.sh) via the [volcano-sh/website](https://github.com/volcano-sh/website) repository.
+        - label: If documentation changes are required, I will ensure the relevant documents are updated in the volcano-global repository.
           required: false

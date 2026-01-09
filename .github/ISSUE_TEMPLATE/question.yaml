@@ -1,7 +1,25 @@
 name: Question
-description: Have a question about volcano
+description: Have a question about volcano-global
 labels: kind/question
 body:
+  - type: dropdown
+    attributes:
+      label: Question Category
+      description: What is your question about?
+      options:
+        - Installation/Deployment
+        - Multi-cluster scheduling
+        - AI/ML workload management
+        - Bigdata workload management
+        - Queue management
+        - Integration with Karmada
+        - Integration with Volcano
+        - Performance tuning
+        - Troubleshooting
+        - Other
+    validations:
+      required: true
+
   - type: textarea
     attributes:
       label: Please describe your problem in detail
@@ -13,7 +31,13 @@ body:
       label: Any other relevant information
       description: |
         Kubernetes version, OS configuration, OS/Kernel version, etc.
+        For multi-cluster questions, provide details about your cluster setup.
         Use the following commands:
         $ kubectl version
         $ cat /etc/os-release
         $ uname -a
+        
+        Multi-cluster details:
+        - Number of clusters
+        - Karmada version
+        - Volcano-global version
