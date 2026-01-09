@@ -67,7 +67,28 @@ kubectl --context karmada-host annotate secret karmada-webhook-config \
   --namespace=karmada-system
 ```
 
-## 4. Deploy the volcano-global controller and webhook manager at Karmada control plane cluster
+## 4. Apply the required CRD at Karmada control plane
+
+In addition to using `Karmada` CRDs, `volcano-global` also requires
+the introduction of some `Volcano` CRDs to enable the **queue capability** for the `volcano-global dispatcher`.
+
+Required `Volcano` CRD List:
+- batch.volcano.sh_jobs
+- scheduling.volcano.sh_queues
+- bus.volcano.sh_commands
+- batch.volcano.sh_hyperjobs
+
+```bash
+# Switch to Karmada host kubeconfig.
+export KUBECONFIG=$HOME/.kube/karmada.config
+
+# Apply the required CRD to Karmada control plane.
+kubectl --context karmada-apiserver apply -f docs/deploy/training.volcano.sh_hyperjobs.yaml
+kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volcano/raw/release-1.10/installer/helm/chart/volcano/crd/bases/batch.volcano.sh_jobs.yaml
+kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volcano/raw/release-1.10/installer/helm/chart/volcano/crd/bases/scheduling.volcano.sh_queues.yaml
+```
+
+## 5. Deploy the volcano-global controller and webhook manager at Karmada control plane cluster
 
 ```bash
 # Switch to Karmada host kubeconfig.
@@ -83,25 +104,6 @@ kubectl --context karmada-host apply -f docs/deploy/volcano-global-webhook-manag
 
 # Apply the webhook configuration.
 kubectl --context karmada-apiserver apply -f docs/deploy/volcano-global-webhooks.yaml
-```
-
-## 5. Apply the required CRD at Karmada control plane
-
-In addition to using `Karmada` CRDs, `volcano-global` also requires
-the introduction of some `Volcano` CRDs to enable the **queue capability** for the `volcano-global dispatcher`.
-
-Required `Volcano` CRD List:
-- batch.volcano.sh_jobs
-- scheduling.volcano.sh_queues
-- bus.volcano.sh_commands
-
-```bash
-# Switch to Karmada host kubeconfig.
-export KUBECONFIG=$HOME/.kube/karmada.config
-
-# Apply the required CRD to Karmada control plane.
-kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volcano/raw/release-1.10/installer/helm/chart/volcano/crd/bases/batch.volcano.sh_jobs.yaml
-kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volcano/raw/release-1.10/installer/helm/chart/volcano/crd/bases/scheduling.volcano.sh_queues.yaml
 ```
 
 ## 6. Apply the custom volcano job and queue resource interpreters at Karmada control plane
