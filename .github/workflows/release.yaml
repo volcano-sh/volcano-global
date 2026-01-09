@@ -1,0 +1,78 @@
+name: image release
+on:
+  # Automatically push the image when merging to main branch
+  push:
+    branches:
+      - main
+    # Automatically push the image when releasing the version
+    tags:
+      - "v*.*.*"
+  # Allow manually triggering the workflow for debugging
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine image tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] || [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "TAG=latest" >> $GITHUB_ENV
+            echo "RELEASE_VER=latest" >> $GITHUB_ENV
+          else
+            echo "TAG=${{ github.ref_name }}" >> $GITHUB_ENV
+            echo "RELEASE_VER=${{ github.ref_name }}" >> $GITHUB_ENV
+          fi
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3 
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push controller-manager to Docker Hub
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./installer/dockerfile/controller-manager/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: volcanosh/volcano-global-controller-manager:${{ env.TAG }}
+
+      - name: Build and Push webhook-manager to Docker Hub
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./installer/dockerfile/webhook-manager/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: volcanosh/volcano-global-webhook-manager:${{ env.TAG }}
+
+      - name: Logout from registries
+        if: always()
+        run: |
+          docker logout
