@@ -38,7 +38,7 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-    "volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
+	"volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
 )
 
 // handleDSCDeletion performs the cleanup logic when a DataSourceClaim is being deleted.
@@ -318,6 +318,8 @@ func (c *DataDependencyController) dynamicBinding(dsc *v1alpha1.DataSourceClaim)
 	ds := &v1alpha1.DataSource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: generateDataSourceName(dsc),
+			// Initialize with Finalizer
+			Finalizers: []string{DataSourceFinalizer},
 		},
 		Spec: v1alpha1.DataSourceSpec{
 			System:     dsc.Spec.System,
@@ -389,7 +391,7 @@ func (c *DataDependencyController) addClaimRefToDS(ds *v1alpha1.DataSource, clai
 			}
 		}
 
-		// Check if DataSource needs finalizer - but don't update immediately
+		// Check if DataSource needs finalizer
 		needsFinalizerUpdate := false
 		if !controllerutil.ContainsFinalizer(dsToUpdate, DataSourceFinalizer) {
 			controllerutil.AddFinalizer(dsToUpdate, DataSourceFinalizer)
@@ -462,7 +464,6 @@ func (c *DataDependencyController) removeClaimRefFromDS(dsName string, dscUID ty
 		}
 
 		// --- Handle Reclaim Policy ---
-
 		// After a successful update, check if the DS should be reclaimed.
 		if len(updatedDS.Status.ClaimRefs) == 0 && updatedDS.Spec.ReclaimPolicy == v1alpha1.ReclaimPolicyDelete {
 			klog.V(2).Infof("DS %s is now un-referenced and has ReclaimPolicy 'Delete'. Deleting.", updatedDS.Name)
@@ -690,9 +691,9 @@ func (c *DataDependencyController) triggerRescheduling(rb *workv1alpha2.Resource
 			}
 			rbToUpdate.Spec.Placement.ClusterAffinity.ExcludeClusters = uniqueExcluded
 
-            // Record what we added for future cleanup (sorted for deterministic order)
-            sort.Strings(newExcludedClusters)
-            rbToUpdate.Annotations[ExcludedClustersAnnotation] = strings.Join(newExcludedClusters, ",")
+			// Record what we added for future cleanup (sorted for deterministic order)
+			sort.Strings(newExcludedClusters)
+			rbToUpdate.Annotations[ExcludedClustersAnnotation] = strings.Join(newExcludedClusters, ",")
 		} else {
 			// If no DS clusters, remove our previous exclusions
 			if prevExcluded, exists := rbToUpdate.Annotations[ExcludedClustersAnnotation]; exists && prevExcluded != "" {
@@ -799,9 +800,9 @@ func (c *DataDependencyController) injectPlacementAffinity(rb *workv1alpha2.Reso
 			}
 			rbToUpdate.Spec.Placement.ClusterAffinity.ExcludeClusters = uniqueExcluded
 
-            // Record what we added for future cleanup (sorted for deterministic order)
-            sort.Strings(excludedClusters)
-            rbToUpdate.Annotations[ExcludedClustersAnnotation] = strings.Join(excludedClusters, ",")
+			// Record what we added for future cleanup (sorted for deterministic order)
+			sort.Strings(excludedClusters)
+			rbToUpdate.Annotations[ExcludedClustersAnnotation] = strings.Join(excludedClusters, ",")
 		}
 		// Note: If dsClusterNames is empty, we don't modify ClusterAffinity
 		// This preserves any existing user configuration
@@ -854,24 +855,11 @@ func (c *DataDependencyController) handleUnbinding(dsc *v1alpha1.DataSourceClaim
 		}
 	}
 
-	// Step 3: Remove claim reference from DataSource (only if DS is not being deleted)
-	// If DS is being deleted, the ClaimRef removal is unnecessary as the DS will be deleted
-	if ds.DeletionTimestamp == nil {
-		if err := c.removeClaimRefFromDS(ds.Name, dsc.UID); err != nil {
-			klog.Errorf("Failed to remove claim ref from DS %s: %v", ds.Name, err)
-			// Continue with unbinding even if this fails
-		}
-	} else {
-		// Step 4: Handle DataSource finalizer cleanup if DS is being deleted
-		// This is the final step as it may allow DS to be actually deleted
-		klog.V(4).Infof("DS %s is being deleted, start to clean up finalizer", ds.Name)
-		if err := c.cleanupDataSourceFinalizer(ds); err != nil {
-			klog.Errorf("Failed to cleanup DS finalizer for %s: %v", ds.Name, err)
-			// Continue with other RBs even if one fails
-		}
+	// Step 3: Remove claim reference from DataSource
+	if err := c.removeClaimRefFromDS(ds.Name, dsc.UID); err != nil {
+		klog.Errorf("Failed to remove claim ref from DS %s: %v", ds.Name, err)
 	}
 
-	klog.V(2).Infof("Successfully unbound DSC %s/%s from DS %s", dsc.Namespace, dsc.Name, ds.Name)
 	return nil
 }
 

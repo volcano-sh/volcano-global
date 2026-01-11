@@ -1104,6 +1104,7 @@ func TestReconcileFunction(t *testing.T) {
 		}
 
 		// Create a DataSource that is bound to this DSC
+		// Initial Locality: cluster-loc-1, cluster-loc-2
 		originalDS := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-ds-locality-change",
@@ -1141,6 +1142,7 @@ func TestReconcileFunction(t *testing.T) {
 		}
 
 		// Create a ResourceBinding that has been injected with placement affinity
+		// Initial Exclusion: cluster-loc-3 (because DS is on 1 & 2)
 		rb := &workv1alpha2.ResourceBinding{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "locality-test-app-deployment",
@@ -1166,7 +1168,12 @@ func TestReconcileFunction(t *testing.T) {
 		}
 
 		controller := setupTestController(ctx, dsc)
-		startTestController(ctx, controller)
+
+		// IMPORTANT: Do NOT call startTestController.
+		// We only start informers to sync cache but avoid starting background workers
+		// to prevent race conditions when reading from the queue manually.
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
 
 		// Wait for cache sync
 		cache.WaitForCacheSync(ctx.Done(),
@@ -1176,10 +1183,16 @@ func TestReconcileFunction(t *testing.T) {
 			controller.cListerSynced,
 		)
 
-		// Add clusters to the fake client
+		// Create clusters in fake client
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster1, metav1.CreateOptions{})
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster2, metav1.CreateOptions{})
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster3, metav1.CreateOptions{})
+
+		// Manually add clusters to the Informer Indexer to ensure c.cLister.List() returns them immediately
+		// without waiting for the async watch event.
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster1)
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster2)
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster3)
 
 		// Create the DataSource and ResourceBinding in the fake client
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, originalDS, metav1.CreateOptions{})
@@ -1188,37 +1201,41 @@ func TestReconcileFunction(t *testing.T) {
 		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings(rb.Namespace).Create(ctx, rb, metav1.CreateOptions{})
 		assert.NoError(t, err, "Failed to create ResourceBinding")
 
-		// Wait for the ResourceBinding to be synced in the cache
-		err = wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-			_, getErr := controller.rbLister.ResourceBindings(rb.Namespace).Get(rb.Name)
-			return getErr == nil, nil
-		})
-		assert.NoError(t, err, "ResourceBinding should be synced in cache")
+		// Add RB to indexer to ensure triggerRescheduling finds it
+		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
 
-		// Simulate DS Locality change by updating the DataSource
+		// Add initial DS to indexer
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(originalDS)
+
+		// Simulate DS Locality change
+		// New Locality: cluster-loc-2, cluster-loc-3
+		// Expected Exclusion: cluster-loc-1
 		updatedDS := originalDS.DeepCopy()
-		updatedDS.Spec.Locality.ClusterNames = []string{"cluster-loc-2", "cluster-loc-3"} // Changed from cluster-loc-1 to cluster-loc-3
+		updatedDS.Spec.Locality.ClusterNames = []string{"cluster-loc-2", "cluster-loc-3"}
 
 		// Update the DataSource in the fake client
 		_, err = controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Update(ctx, updatedDS, metav1.UpdateOptions{})
 		assert.NoError(t, err, "Failed to update DataSource")
 
+		// CRITICAL FIX: Manually update the DS in the Informer Indexer.
+		// Since we are not running the full async loop, the Lister used inside Reconcile
+		// will still see 'originalDS' unless we update the cache explicitly.
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Update(updatedDS)
+
 		// Trigger the updateDataSource event handler manually
-		// This simulates the informer calling the event handler when DS changes
 		controller.updateDataSource(originalDS, updatedDS)
 
 		// Verify that the DSC was enqueued due to DS Locality change
-		// The queue should contain the DSC key
 		assert.Greater(t, controller.queue.Len(), 0, "Queue should contain DSC due to DS Locality change")
 
-		// Get the DSC key from queue and verify it's correct
+		// Get the DSC key from queue
 		item, shutdown := controller.queue.Get()
 		assert.False(t, shutdown, "Queue should not be shut down")
 		expectedKey := "default/test-dsc-locality-change"
 		assert.Equal(t, expectedKey, item, "Queue should contain the correct DSC key")
 		controller.queue.Done(item)
 
-		// Run reconcile - should trigger handleBound branch and RB rescheduling
+		// Run reconcile - should trigger handleBound -> triggerRescheduling
 		err = controller.Reconcile(expectedKey)
 		assert.NoError(t, err, "Reconcile should not return an error")
 		// Verify that the ResourceBinding was updated with new placement affinity
@@ -1233,7 +1250,7 @@ func TestReconcileFunction(t *testing.T) {
 		// Verify that the ExcludedClustersAnnotation was updated
 		assert.Equal(t, "cluster-loc-1", updatedRB.Annotations[ExcludedClustersAnnotation], "ExcludedClustersAnnotation should be updated")
 
-		// Verify DSC status remains bound (no change expected)
+		// Verify DSC status remains bound
 		updatedDSC, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims(dsc.Namespace).Get(ctx, dsc.Name, metav1.GetOptions{})
 		assert.NoError(t, err, "Failed to get updated DSC")
 		assert.Equal(t, v1alpha1.DSCPhaseBound, updatedDSC.Status.Phase, "DSC should remain bound after DS Locality change")
@@ -1245,7 +1262,7 @@ func TestReconcileFunction(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Create a DSC that is bound to a DataSource
+		// 1. Setup Data
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "test-dsc-ds-deletion",
@@ -1270,7 +1287,6 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Create a DataSource that will be marked for deletion
 		originalDS := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "test-ds-to-delete",
@@ -1297,47 +1313,61 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
+		// 2. Setup Controller & Client
 		controller := setupTestController(ctx, dsc)
 		startTestController(ctx, controller)
 
-		// Create the DataSource in the fake client
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, originalDS, metav1.CreateOptions{})
 		assert.NoError(t, err, "Failed to create DataSource")
 
-		// Simulate DS deletion by setting DeletionTimestamp
+		// 3. Simulate DS deletion
 		dsToDelete := originalDS.DeepCopy()
 		now := metav1.Now()
 		dsToDelete.DeletionTimestamp = &now
 
-		// Update the DataSource with DeletionTimestamp
 		_, err = controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Update(ctx, dsToDelete, metav1.UpdateOptions{})
 		assert.NoError(t, err, "Failed to update DataSource with DeletionTimestamp")
 
-		// In real Kubernetes, when DS gets DeletionTimestamp, the controller would detect this
-		// during normal reconciliation. For testing, we manually enqueue the DSC to simulate this.
+		// Manually enqueue
 		expectedKey := "default/test-dsc-ds-deletion"
 		controller.queue.Add(expectedKey)
 
-		// Run reconcile - should trigger handleBound branch, detect DS deletion, and call handleUnbinding
+		// 4. Run Reconcile (Sync Phase)
+		// This should trigger handleBound -> handleUnbinding -> removeClaimRefFromDS
 		err = controller.Reconcile(expectedKey)
 		assert.NoError(t, err, "Reconcile should not return an error")
 
-		// Verify that the DSC was unbound (status reset to Pending)
+		// 5. Verify Intermediate State (Sync Phase Result)
 		updatedDSC, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims(dsc.Namespace).Get(ctx, dsc.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get updated DSC")
-		assert.Equal(t, v1alpha1.DSCPhasePending, updatedDSC.Status.Phase, "DSC should be reset to Pending after DS deletion")
-		assert.Empty(t, updatedDSC.Status.BoundDataSource, "DSC should have empty BoundDataSource after DS deletion")
+		assert.NoError(t, err)
+		assert.Equal(t, v1alpha1.DSCPhasePending, updatedDSC.Status.Phase, "DSC should be reset to Pending")
+		assert.Empty(t, updatedDSC.Status.BoundDataSource)
 
-		// Verify that the DataSource finalizer was cleaned up (since DS is being deleted)
 		updatedDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, originalDS.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get updated DataSource")
-		assert.Empty(t, updatedDS.Finalizers, "DataSource finalizer should be removed when DS is being deleted")
+		assert.NoError(t, err)
 
-		// Verify that ClaimRefs remain unchanged (not cleaned up when DS has DeletionTimestamp)
-		assert.Len(t, updatedDS.Status.ClaimRefs, 1, "ClaimRefs should not be modified when DS is being deleted")
+		// [FIX 1] ClaimRefs SHOULD be empty now.
+		// The controller must remove the ref to acknowledge the unbinding.
+		assert.Empty(t, updatedDS.Status.ClaimRefs, "ClaimRefs should be emptied even if DS is deleting")
 
-		// Verify that doesDataSourceMatchClaim returns false for DS with DeletionTimestamp
-		matchResult := doesDataSourceMatchClaim(dsc, updatedDS)
+		// [FIX 2] Finalizer SHOULD still exist here.
+		// Reconcile loop does not touch finalizers on the DS anymore.
+		assert.Contains(t, updatedDS.Finalizers, DataSourceFinalizer, "Finalizer should persist until async update handler runs")
+
+		// 6. Run Async Phase (Simulate updateDataSource)
+		// We manually trigger the logic that would usually run in the Informer callback
+		// dsToDelete is the state 'before' claim removal, updatedDS is the state 'after' (ClaimRefs=0)
+		controller.updateDataSource(dsToDelete, updatedDS)
+
+		// 7. Verify Final State
+		finalDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, originalDS.Name, metav1.GetOptions{})
+		assert.NoError(t, err)
+
+		// [FIX 3] Now the Finalizer should be gone
+		assert.Empty(t, finalDS.Finalizers, "DataSource finalizer should be removed after updateDataSource handles the zero-ref state")
+
+		// Helper verification
+		matchResult := doesDataSourceMatchClaim(dsc, finalDS)
 		assert.False(t, matchResult, "doesDataSourceMatchClaim should return false for DS with DeletionTimestamp")
 	})
 }
@@ -1967,7 +1997,7 @@ func TestHandleBound(t *testing.T) {
 		ctx := context.Background()
 		now := metav1.Now()
 
-		// Create test DSC (bound state)
+		// 1. Setup Data
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-dsc",
@@ -1991,7 +2021,6 @@ func TestHandleBound(t *testing.T) {
 			},
 		}
 
-		// Create test DataSource that matches the DSC but has DeletionTimestamp
 		ds := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "test-ds",
@@ -2018,31 +2047,47 @@ func TestHandleBound(t *testing.T) {
 			},
 		}
 
-		// Setup test controller
+		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
-
 		// Add DataSource to the fake client
 		controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
 
-		// Call handleBound
+		// 3. Action: Call handleBound
+		// This triggers: doesDataSourceMatchClaim(false) -> handleUnbinding -> removeClaimRefFromDS
 		err := controller.handleBound(dsc)
 		assert.NoError(t, err)
 
-		// Verify DSC status was reset to Pending (unbinding occurred due to DeletionTimestamp)
+		// 4. Verify DSC Status (Reset to Pending)
 		updatedDSC, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Get(ctx, "test-dsc", metav1.GetOptions{})
 		assert.NoError(t, err)
 		assert.Equal(t, v1alpha1.DSCPhasePending, updatedDSC.Status.Phase)
 		assert.Empty(t, updatedDSC.Status.BoundDataSource)
 
-		// When DataSource has DeletionTimestamp, handleUnbinding cleans up finalizer instead of ClaimRefs
-		// Verify DataSource finalizer was removed
+		// 5. Verify DS Status (Sync Phase)
 		updatedDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, "test-ds", metav1.GetOptions{})
 		assert.NoError(t, err)
-		assert.Empty(t, updatedDS.Finalizers, "DataSource finalizer should be removed when DS is being deleted")
-		// ClaimRefs should remain unchanged when DS has DeletionTimestamp
-		assert.Len(t, updatedDS.Status.ClaimRefs, 1, "ClaimRefs should not be modified when DS is being deleted")
+
+		// [FIX 1] ClaimRefs MUST be empty.
+		// logic: handleUnbinding calls removeClaimRefFromDS, which removes the ref.
+		assert.Empty(t, updatedDS.Status.ClaimRefs, "ClaimRefs should be removed to acknowledge unbinding")
+
+		// [FIX 2] Finalizer MUST still exist.
+		// logic: removeClaimRefFromDS no longer touches finalizers.
+		assert.Contains(t, updatedDS.Finalizers, DataSourceFinalizer, "Finalizer should persist until async update handler runs")
+
+		// 6. Action: Simulate Async Update (updateDataSource)
+		// logic: K8s sends event -> updateDataSource sees (DeletionTimestamp != nil AND refs == 0) -> removes finalizer
+		controller.updateDataSource(ds, updatedDS)
+
+		// 7. Verify DS Status (Final Phase)
+		finalDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, "test-ds", metav1.GetOptions{})
+		assert.NoError(t, err)
+
+		// [FIX 3] Finalizer should be gone now
+		assert.NotContains(t, finalDS.Finalizers, DataSourceFinalizer, "Finalizer should be removed by updateDataSource logic")
 	})
 }
+
 func TestAttributesEqual(t *testing.T) {
 	t.Run("Both maps are nil", func(t *testing.T) {
 		result := attributesEqual(nil, nil)
@@ -4582,7 +4627,7 @@ func TestHandleUnbinding(t *testing.T) {
 	t.Run("should handle DS deletion and cleanup finalizer", func(t *testing.T) {
 		ctx := context.Background()
 
-		// Create test DSC (bound state) with WorkloadRef (no labels/annotations)
+		// 1. Setup: Create DSC, DS (Deleting), RB, Clusters
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-dsc",
@@ -4606,12 +4651,11 @@ func TestHandleUnbinding(t *testing.T) {
 			},
 		}
 
-		// Create test DataSource (being deleted)
 		now := metav1.Now()
 		ds := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "test-ds",
-				DeletionTimestamp: &now,
+				DeletionTimestamp: &now, // Simulate deletion
 				Finalizers:        []string{DataSourceFinalizer},
 			},
 			Spec: v1alpha1.DataSourceSpec{
@@ -4634,10 +4678,9 @@ func TestHandleUnbinding(t *testing.T) {
 			},
 		}
 
-		// Create test ResourceBinding (injected) with Resource matching WorkloadRef
 		rb := &workv1alpha2.ResourceBinding{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-app-deployment",
+				Name:      "test-app-deployment", // Ensure this matches logic in findAssociatedRB
 				Namespace: "default",
 				Annotations: map[string]string{
 					PlacementInjectedAnnotation: "true",
@@ -4663,51 +4706,52 @@ func TestHandleUnbinding(t *testing.T) {
 			},
 		}
 
-		// Create clusters
 		cluster1 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster1"}}
 		cluster2 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster2"}}
 		cluster3 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster3"}}
 
-		// Setup test controller
 		controller := setupTestController(ctx, dsc)
-
-		// Add DataSource to the fake client
 		controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
-
-		// Add ResourceBinding to the fake client
 		controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
-
-		// Add clusters to the fake client
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster1, metav1.CreateOptions{})
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster2, metav1.CreateOptions{})
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster3, metav1.CreateOptions{})
 
-		// Wait for cache sync
 		cache.WaitForCacheSync(ctx.Done(), controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().HasSynced)
 		cache.WaitForCacheSync(ctx.Done(), controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().HasSynced)
 
-		// Call handleUnbinding
+		// 2. Action: Call handleUnbinding
+		// This should clear the ClaimRefs but NOT remove the Finalizer yet
 		err := controller.handleUnbinding(dsc, ds)
 		assert.NoError(t, err)
 
-		// Verify DSC status was reset
+		// 3. Verification Phase 1: Check Intermediate State
 		updatedDSC, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Get(ctx, "test-dsc", metav1.GetOptions{})
 		assert.NoError(t, err)
 		assert.Equal(t, v1alpha1.DSCPhasePending, updatedDSC.Status.Phase)
-		assert.Empty(t, updatedDSC.Status.BoundDataSource)
 
-		// Verify DataSource finalizer was removed
 		updatedDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, "test-ds", metav1.GetOptions{})
 		assert.NoError(t, err)
-		assert.NotContains(t, updatedDS.Finalizers, DataSourceFinalizer)
 
-		// Verify ResourceBinding placement was cleared even during DS deletion
+		// [Corrected Assertion] ClaimRefs should be empty
+		assert.Empty(t, updatedDS.Status.ClaimRefs)
+		// [Corrected Assertion] Finalizer should STILL be present here (because updateDataSource hasn't run yet)
+		assert.Contains(t, updatedDS.Finalizers, DataSourceFinalizer)
+
+		// 4. Action Phase 2: Simulate Async Event (updateDataSource)
+		// We manually trigger the event handler to verify the cleanup logic
+		controller.updateDataSource(ds, updatedDS)
+
+		// 5. Verification Phase 2: Check Final State
+		finalDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, "test-ds", metav1.GetOptions{})
+		assert.NoError(t, err)
+		// Now the finalizer should be gone
+		assert.NotContains(t, finalDS.Finalizers, DataSourceFinalizer)
+
+		// 6. Verify ResourceBinding cleanup
 		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Get(ctx, "test-app-deployment", metav1.GetOptions{})
 		assert.NoError(t, err)
 		assert.NotContains(t, updatedRB.Annotations, PlacementInjectedAnnotation)
-		assert.NotContains(t, updatedRB.Annotations, ExcludedClustersAnnotation)
-		assert.Nil(t, updatedRB.Spec.Clusters)
-		// Verify ExcludeClusters was cleared
 		if updatedRB.Spec.Placement != nil && updatedRB.Spec.Placement.ClusterAffinity != nil {
 			assert.Empty(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters)
 		}

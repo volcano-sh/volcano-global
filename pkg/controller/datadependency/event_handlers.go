@@ -217,29 +217,47 @@ func (c *DataDependencyController) updateDataSource(oldObj, newObj interface{}) 
 	klog.V(4).Infof("DataSource updated: %s", newDS.Name)
 
 	// Check if this is a deletion event (DeletionTimestamp is set)
-	if newDS.DeletionTimestamp != nil && oldDS.DeletionTimestamp == nil {
-		klog.V(4).Infof("DataSource %s is being deleted", newDS.Name)
+	if newDS.DeletionTimestamp != nil {
 
-		// If there are bound DSCs, enqueue them to handle unbinding
-		if len(newDS.Status.ClaimRefs) > 0 {
-			klog.V(4).Infof("DataSource %s has %d bound DSCs, will trigger unbinding", newDS.Name, len(newDS.Status.ClaimRefs))
-			for _, claimRef := range newDS.Status.ClaimRefs {
-				key := claimRef.Namespace + "/" + claimRef.Name
-				klog.V(4).Infof("Enqueuing bound DSC %s due to DataSource %s deletion", key, newDS.Name)
-				c.queue.Add(key)
-			}
-		} else {
-			// If there are no bound DSCs, we need to handle the finalizer removal directly
-			// Otherwise, the DS will be stuck in Terminating state
-			klog.V(4).Infof("DataSource %s has no bound DSCs, removing finalizer directly", newDS.Name)
+		// Case A: Deletion just started (Edge Trigger)
+		// oldDS has no DeletionTimestamp, but newDS has one.
+		if oldDS.DeletionTimestamp == nil {
+			klog.V(4).Infof("DataSource %s marked for deletion", newDS.Name)
 
-			// Use the handler's cleanupDataSourceFinalizer method to remove the finalizer
-			if err := c.cleanupDataSourceFinalizer(newDS); err != nil {
-				klog.Errorf("Failed to cleanup finalizer from DataSource %s: %v", newDS.Name, err)
-				return
+			if len(newDS.Status.ClaimRefs) > 0 {
+				// A.1: Bound DSCs exist.
+				// Action: Enqueue all DSCs to trigger the unbinding flow.
+				klog.V(4).Infof("DataSource %s has %d bound DSCs, triggering unbinding flow", newDS.Name, len(newDS.Status.ClaimRefs))
+				for _, claimRef := range newDS.Status.ClaimRefs {
+					key := claimRef.Namespace + "/" + claimRef.Name
+					klog.V(4).Infof("Enqueuing bound DSC %s due to DataSource %s deletion start", key, newDS.Name)
+					c.queue.Add(key)
+				}
+			} else {
+				// A.2: No bound DSCs (Idle DataSource).
+				// Action: Remove finalizer immediately to allow physical deletion.
+				klog.V(4).Infof("DataSource %s is idle (no refs), removing finalizer immediately", newDS.Name)
+				if err := c.cleanupDataSourceFinalizer(newDS); err != nil {
+					klog.Errorf("Failed to cleanup finalizer for %s: %v", newDS.Name, err)
+				}
 			}
-			klog.V(4).Infof("Successfully removed finalizer from DataSource %s", newDS.Name)
+			return // Exit after handling deletion initiation
 		}
+
+		// Case B: Deletion in progress (Level Trigger)
+		// oldDS already had DeletionTimestamp. This update is likely a Status update
+		// triggered by a DSC unbinding (removeClaimRefFromDS).
+		// We check if all references have been cleared.
+		if len(newDS.Status.ClaimRefs) == 0 {
+			klog.V(4).Infof("DataSource %s is terminating and references dropped to zero. Removing finalizer.", newDS.Name)
+			// Action: The last DSC has unbound, so it is safe to remove the finalizer.
+			if err := c.cleanupDataSourceFinalizer(newDS); err != nil {
+				klog.Errorf("Failed to cleanup finalizer for %s: %v", newDS.Name, err)
+			}
+		}
+
+		// Note: If len > 0, it means unbinding is still in progress for other DSCs.
+		// We do nothing here and wait for the next status update event.
 		return
 	}
 
