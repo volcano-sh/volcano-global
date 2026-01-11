@@ -1238,7 +1238,6 @@ func TestReconcileFunction(t *testing.T) {
 		// Run reconcile - should trigger handleBound -> triggerRescheduling
 		err = controller.Reconcile(expectedKey)
 		assert.NoError(t, err, "Reconcile should not return an error")
-
 		// Verify that the ResourceBinding was updated with new placement affinity
 		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings(rb.Namespace).Get(ctx, rb.Name, metav1.GetOptions{})
 		assert.NoError(t, err, "Failed to get updated ResourceBinding")

@@ -78,3 +78,25 @@ unit-test:
 clean:
 	rm -rf _output/
 	rm -f *.log
+
+mod-download-go:
+	go mod download
+
+.PHONY: mirror-licenses
+mirror-licenses: mod-download-go
+	@mkdir -p licenses; \
+	GOOS=${OS} go install istio.io/tools/cmd/license-lint@1.25.0; \
+	if [ -d licenses ] && [ "$(ls -A licenses 2>/dev/null)" ]; then \
+		cd licenses; \
+		rm -rf `ls ./ | grep -v LICENSE`; \
+		cd -; \
+	fi; \
+	$(shell go env GOPATH)/bin/license-lint --mirror
+
+.PHONY: lint-licenses
+lint-licenses:
+	@if test -d licenses; then $(shell go env GOPATH)/bin/license-lint --config config/license-lint.yaml; fi
+
+.PHONY: licenses-check
+licenses-check: mirror-licenses
+	hack/licenses-check.sh
