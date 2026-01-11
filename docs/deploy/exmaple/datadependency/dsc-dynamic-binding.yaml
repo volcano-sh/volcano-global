@@ -9,7 +9,7 @@ spec:
   # Required: category of the data source within the system
   dataSourceType: "table"
   # Required: logical name of the data source to claim
-  dataSourceName: "dc1.db.user"
+  dataSourceName: "prod.db.user"
   # Required: workload that this claim is associated with
   workload:
     apiVersion: "apps/v1"

@@ -1,876 +1,294 @@
-# Data-Aware Dependency Scheduling for Volcano Global
-
-## Summary
-
-This proposal introduces a comprehensive data-aware dependency scheduling system for Volcano Global, enabling workloads to be scheduled based on data locality and availability across multiple Kubernetes clusters. The system provides automatic data discovery, dynamic binding, and locality-aware scheduling through a pluggable architecture that integrates with various external data storage systems.
-
+# Data Aware Dependency Scheduling for Volcano Global
 ## Motivation
 
-### Goals
+### 1. Context and Pain Points
 
-- **Data Locality Optimization**: Schedule workloads to clusters where required data is physically located to minimize data transfer costs and improve performance
-- **Pluggable Architecture**: Support multiple data storage systems (Amoro, HDFS, Iceberg, etc.) through a unified plugin interface
-- **Lifecycle Management**: Automatically manage the lifecycle of data dependencies and clean up resources when data is no longer available
-- **Multi-Cluster Coordination**: Coordinate data-aware scheduling across multiple Kubernetes clusters managed by Karmada
+Volcano Global, as a multi-cluster scheduling platform in the community, already provides robust capabilities for cross-cluster CPU and Memory resource scheduling, supporting advanced features like priority queues scheduling. However, in High-Performance Computing (HPC) scenarios such as AI training and Big Data analysis, task execution depends heavily on **Data Resources**, not just compute resources.
 
-### Non-Goals
+Currently, Volcano Global lacks support for scheduling constraints based on "Data Locality." In a multi-cluster environment, this limitation implies that the scheduler might dispatch tasks to clusters physically distant from their data sources. This not only results in prohibitive cross-region bandwidth costs and high I/O latency but also forces operators to manually maintain complex, static "Task-to-Cluster" mapping rules. As data scales, this manual intervention becomes highly inefficient and prone to causing cluster load imbalance.
 
-- Data replication or migration between clusters
-- Direct data access or storage management
-- Real-time data streaming or processing
+### 2. Problem Analysis: The Relationship Between Data and Clusters
 
-## Design Details
+To address these pain points, we must first clarify the relationship between "data" and "compute clusters" in modern architectures.
 
-### Architecture Overview
+Initially, there was a misconception that data resides directly on the nodes of a compute cluster (similar to local storage). However, in large-scale production environments, this assumption is invalid. The real challenge we face is not simple "Node-Level Affinity," but rather complex **"Topological Affinity under Compute-Storage Disaggregation."**
 
-The data-aware dependency scheduling system consists of the following components:
+The core question we must answer is: **When data resides in external storage systems (e.g., HDFS, S3, Iceberg) rather than inside the Kubernetes cluster, how does the system determine which compute cluster is the "optimal" placement?**
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Karmada Control Plane                        │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │ DataSourceClaim │  │   DataSource    │  │PropagationPolicy│ │
-│  │      (DSC)      │  │      (DS)       │  │                 │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                 Volcano Global Controller                       │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │              DataDependency Controller                      │ │
-│  │  ┌─────────────────┐  ┌─────────────────┐                  │ │
-│  │  │ Plugin Manager  │  │ Binding Handler │                  │ │
-│  │  └─────────────────┘  └─────────────────┘                  │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    External Data Systems                        │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
-│  │    Amoro    │  │    HDFS     │  │   Iceberg   │    ...      │
-│  └─────────────┘  └─────────────┘  └─────────────┘             │
-└─────────────────────────────────────────────────────────────────┘
-```
+![](images/datadependency_user_scenario.png)
+### 3. Technical Facts and Requirement Clarification
 
-### Core Components
+Through in-depth analysis of real-world business scenarios (specifically involving the **Amoro** data lake management platform), we have identified the following key technical facts:
 
-#### 1. Custom Resource Definitions (CRDs)
-
-##### DataSourceClaim (DSC)
-Represents a request for data sources by workloads:
-
-```yaml
-apiVersion: datadependency.volcano.sh/v1alpha1
-kind: DataSourceClaim
-metadata:
-  name: ml-training-data
-  namespace: default
-spec:
-  system: "amoro"                    # Data storage system type
-  dataSourceType: "table"           # Type of data source
-  dataSourceName: "dc1.ml.training" # Logical name of data source
-  workload:                          # Workload reference
-    apiVersion: "apps/v1"
-    kind: "Deployment"
-    name: "ml-training"
-    namespace: "default"
-  attributes:                        # Additional query parameters
-    partition: "2024-01"
-status:
-  phase: "Bound"                     # Pending, Bound
-  boundDataSource: "ml-training-data-ds"
-  conditions:
-    - type: "Ready"
-      status: "True"
-      lastTransitionTime: "2024-01-15T10:00:00Z"
-```
-
-##### DataSource (DS)
-Represents actual data sources discovered from external systems:
-
-```yaml
-apiVersion: datadependency.volcano.sh/v1alpha1
-kind: DataSource
-metadata:
-  name: ml-training-data-ds
-  namespace: default
-  labels:
-    datadependency.volcano.sh/system: "amoro"
-    datadependency.volcano.sh/type: "table"
-    datadependency.volcano.sh/name: "dc1.ml.training"
-spec:
-  system: "amoro"
-  type: "table"
-  name: "dc1.ml.training"
-  locality:                          # Clusters where data is available
-    - "cluster-us-west"
-    - "cluster-us-east"
-  attributes:
-    size: "100GB"
-    format: "parquet"
-  reclaimPolicy: "Retain"            # Retain, Delete
-status:
-  claimRefs:                         # References to bound claims
-    - name: "ml-training-data"
-      namespace: "default"
-  boundClaims: 1
-  conditions:
-    - type: "Available"
-      status: "True"
-      lastTransitionTime: "2024-01-15T10:00:00Z"
-```
-
-#### 2. DataDependency Controller
-
-The controller manages the lifecycle of data dependencies:
-
-**Key Responsibilities:**
-- Monitor DataSourceClaim creation and updates
-- Query external data systems through plugins
-- Create and update DataSource objects
-- Bind DataSourceClaims to appropriate DataSources
-- Update PropagationPolicy cluster affinity based on data locality
-- Handle finalizer-based cleanup
-
-**Controller Logic:**
-```go
-type DataDependencyController struct {
-    client.Client
-    Scheme *runtime.Scheme
+- **Compute-Storage Disaggregation:** Compute tasks run within Kubernetes clusters, while actual data files are stored in a unified Distributed File System (UFS, e.g., HDFS/S3). Compute resources and storage resources are physically separated.
     
-    // Kubernetes clients
-    kubeClient           kubernetes.Interface
-    datadependencyClient versioned.Interface
-    karmadaClient        karmadaversioned.Interface
+- **Cross-Region Bottlenecks:** Although all compute clusters can theoretically access the UFS via the network, **physical distance** dictates performance. Compute clusters are usually deployed in the same Data Center (DC) or Region as specific storage clusters. Cross-DC or Cross-Region data access incurs severe bandwidth bottlenecks and high latency.
     
-    // Informers and listers
-    dscLister            datadependencylisters.DataSourceClaimLister
-    dsLister             datadependencylisters.DataSourceLister
-    configMapLister      corelisters.ConfigMapLister
+- **Metadata-Driven Management:** Users typically manage data via platforms like **Amoro**, which maintains metadata mapping from "Logical Tables" to "Physical Storage Locations."
     
-    // Plugin management
-    pluginManager        PluginManagerInterface
-}
-```
+- **The Operational Gap:** Developers focus on business logic (e.g., "I depend on db.user_table") without knowledge of the underlying storage topology. Meanwhile, operators cannot monitor the data requirements of every task in real-time. Manual labeling approaches cannot keep pace with dynamic data migration and explosive data growth.
 
-#### 3. Plugin System
+### 4. Conclusion: The Proposed Approach
 
-##### Plugin Interface
-```go
-type DataSourcePlugin interface {
-    Name() string
-    Init(config PluginConfig) error
-    Select(ctx context.Context, dsc *v1alpha1.DataSourceClaim) ([]string, error)
-    IsHealthy(ctx context.Context) error
-}
-```
+Based on the analysis above, relying solely on static configurations or native Kubernetes mechanisms is insufficient. We propose building a pluggable **Data-Aware Scheduling Framework**.
 
-##### Plugin Manager
-- **Dynamic Plugin Loading**: Load plugins from external registry
-- **Configuration Management**: Manage plugin configurations via ConfigMap
-- **Health Monitoring**: Monitor plugin health and connectivity
-- **Retry Logic**: Handle transient failures with exponential backoff
-- **Periodic Updates**: Periodically refresh DataSource information
+The core of this framework lies in **introducing a dedicated Data Dependency Controller to bridge the gap between logical data and physical resources.** By utilizing external dependency detection plugins, the controller acts as an intermediary, querying **Amoro** (or other metadata centers) for real-time physical data distribution. It then translates this information into topology constraints that the scheduler can recognize. This design not only decouples the scheduling core from external storage systems but also achieves a fully automated "Compute-to-Data" (Data Gravity) workflow without manual intervention.
 
-##### Amoro Plugin Implementation
-The Amoro plugin demonstrates the plugin architecture:
+## Design Philosophy
+
+Having established the motivation for data-aware scheduling, the design phase focuses on two critical questions: **How do we bridge the gap between logical data and physical clusters?** and **How do we introduce external dependencies without compromising scheduler performance?**
+
+### 1. Core Mechanism: The Translation Layer (Logical to Physical)
+
+Our primary design principle is **"Decoupling Logical from Physical."**
+
+- **The Necessity of API Access:**  
+    From a user's perspective, data is a logical object (e.g., catalog.db.table), which typically carries business semantics or permission boundaries. However, the scheduler cares about physical objects (e.g., s3://warehouse-bucket/), which directly dictate network bandwidth and latency.  
+    In modern data lake architectures like Amoro/Iceberg, **a complex many-to-many relationship exists between Logical Catalogs and Physical Warehouses.** Multiple logical catalogs may point to the same physical storage bucket, while individual tables within a single catalog can be overridden to reside in different locations. Consequently, relying solely on static mapping based on Catalog names is unreliable.
+    
+- **Two-Phase Resolution Strategy:**  
+    To bridge this gap, we designed a "Two-Phase Resolution" mechanism:
+    
+    1. **Dynamic Resolution:** The system queries the Amoro API to resolve the user-declared logical table name (catalog.namespace.table) into the actual metadata storage path (metadata-location).
+        
+    2. **Static Mapping:** Using the resolved physical path, the system applies a pre-configured Location-to-Cluster topology mapping (via ConfigMap) to deduce the physical data center or cluster set where the data resides.
+        
+    
+    This approach allows developers to remain agnostic to the underlying storage topology and enables operators to adjust storage architecture flexibly, with the system automatically handling the intermediate "translation."
+    
+
+### 2. Architectural Decision: Separation of Concerns
+
+**Merely attaching an Amoro query plugin to the scheduler is insufficient.**
+
+Embedding external HTTP API calls directly into the Scheduler's core scheduling loop would introduce severe performance and stability risks:
+
+- **Performance Bottlenecks:** Network latency from external APIs would directly block the scheduling queue, drastically reducing the overall cluster scheduling throughput.
+    
+- **Stability Risks:** Jitter or unavailability (e.g., Timeouts/503 errors) of the external service could cause the scheduler to crash or become unresponsive.
+    
+- **Resource Waste:** If thousands of Pods depend on the same table, it is highly inefficient for the scheduler to initiate thousands of identical queries.
+    
+
+Therefore, our design philosophy is to **offload "Dependency Resolution" (Heavy Lifting) from "Scheduling Decision" (Decision Making).** We introduce a dedicated **DataDependencyController** to handle time-consuming API queries asynchronously in the **Control Plane**.
+
+### 3. State Abstraction: CRD-Based Caching and Reuse
+
+To implement the aforementioned asynchronous processing and state management, we adopt the standard Kubernetes Operator pattern with a two-level CRD abstraction:
+
+- **DataSourceClaim (DSC) — The Intent:**  
+    Represents a specific data requirement from a user (e.g., "I need to access Table A"). It is lightweight and follows the lifecycle of the Pod.
+    
+- **DataSource (DS) — The Cache:**  
+    This is a critical design abstraction. **The DataSource does not represent a physical storage device, but rather a "System-level Cache of the API Resolution Result."**
+    
+
+**Workflow and Efficiency:**  
+When the DataDependencyController detects a new DSC, it first checks if a corresponding DS exists in the cluster:
+
+- **Cache Hit:** If a valid DS exists, the controller directly reuses the existing topology information without making an API call.
+    
+- **Cache Miss:** Only when the DS is absent does the controller query Amoro and create a new DS, which is then available for reuse by all subsequent DSCs referencing the same table.
+    
+
+This design ensures that the frequency of external API access is decoupled from the number of workloads, significantly enhancing system efficiency and scalability.
+## API Design
+
+To achieve declarative management and logical decoupling for data-aware scheduling, we introduce two core Custom Resource Definitions (CRDs): `DataSourceClaim` and `DataSource`. This design adopts a **"Declaration - Cache"** layered pattern: the former represents the user's "requirement declaration," and the latter represents the system's **"metadata cache."**
+
+#### 1. DataSourceClaim: The User Intent
+`DataSourceClaim` (DSC) is a **Namespace-scoped** resource submitted by users (developers) to declare workload dependencies on specific data.
+
+**Design Highlights:**
+*   **Precise Workload Association (Workload Reference):** We introduce the `WorkloadRef` field. This allows the DataDependencyController to use a Dynamic Client to precisely locate the target Job/Deployment and inject scheduling constraints directly, eliminating the need for complex and error-prone label selectors.
+*   **Universal Addressing Coordinates:** External data sources are uniquely identified via a `System`, `Type`, and `Name` triplet. This structure supports extensibility for various data systems (e.g., Amoro, Hive, S3).
 
 ```go
-type AmoroPlugin struct {
-    config     datadependency.PluginConfig
-    httpClient *http.Client
-    baseURL    string
-}
+// DataSourceClaimSpec defines the desired state of DataSourceClaim.
+type DataSourceClaimSpec struct {
+	// System specifies the underlying data system (e.g., "amoro", "hive").
+	// +required
+	System string `json:"system"`
 
-func (p *AmoroPlugin) Select(ctx context.Context, dsc *v1alpha1.DataSourceClaim) ([]string, error) {
-    // Parse table name: catalog.database.table
-    dataSourceName := dsc.Spec.DataSourceName
-    parts := strings.Split(dataSourceName, ".")
-    
-    // Query Amoro REST API for table metadata
-    tableResponse, err := p.queryAmoro(ctx, parts[0], parts[1], parts[2])
-    if err != nil {
-        return nil, err
-    }
-    
-    // Map storage location to clusters using configuration
-    clusters := p.mapLocationToClusters(tableResponse.Metadata.Location)
-    return clusters, nil
-}
-```
+	// DataSourceType specifies the category within the system (e.g., "table", "directory").
+	// +required
+	DataSourceType string `json:"dataSourceType"`
 
-### Workflow
+	// DataSourceName specifies the logical name (e.g., "catalog.db.table").
+	// This serves as the key for the plugin to lookup metadata.
+	// +required
+	DataSourceName string `json:"dataSourceName"`
 
-#### 1. Static Binding Workflow
-For pre-existing DataSources:
+	// Workload specifies the target workload associated with this claim.
+	// This enables the controller to precisely inject scheduling constraints.
+	// +required
+	Workload WorkloadRef `json:"workload"`
 
-```
-1. User creates DataSourceClaim
-2. Controller finds matching DataSource by labels
-3. Controller binds DSC to DS
-4. Controller updates PropagationPolicy cluster affinity
-5. Karmada schedules workload to appropriate clusters
-```
-
-#### 2. Dynamic Binding Workflow
-For on-demand data discovery:
-
-```
-1. User creates DataSourceClaim
-2. Controller queries appropriate plugin
-3. Plugin discovers data location from external system
-4. Controller creates new DataSource
-5. Controller binds DSC to DS
-6. Controller updates PropagationPolicy cluster affinity
-7. Karmada schedules workload to appropriate clusters
-```
-
-#### 3. Error Handling
-- **Plugin Failures**: Retry with exponential backoff
-- **404 Errors**: No retry (data not found)
-- **Network Issues**: Retry with circuit breaker pattern
-- **Configuration Errors**: Log and skip until fixed
-
-### Configuration
-
-#### Plugin Configuration via ConfigMap
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: volcano-global-datasource-plugins
-  namespace: volcano-global
-data:
-  amoro: |
-    {
-      "system": "amoro",
-      "endpoint": {
-        "url": "http://amoro-server.example.com",
-        "port": 1630,
-        "auth": {
-          "type": "basic",
-          "username": "admin",
-          "password": "secret"
-        }
-      },
-      "locationMapping": {
-        "s3://warehouse-dc1/": ["cluster-us-west", "cluster-us-central"],
-        "s3://warehouse-dc2/": ["cluster-us-east"],
-        "hdfs://namenode-dc3/": ["cluster-eu-west"]
-      },
-      "retryConfig": {
-        "maxRetries": 3,
-        "initialBackoff": "1s",
-        "maxBackoff": "30s",
-        "backoffMultiplier": 2.0,
-        "timeout": "30s"
-      }
-    }
-```
-
-## Implementation
-
-### Phase 1: Core Infrastructure (Completed)
-- ✅ Define DataSource and DataSourceClaim CRDs
-- ✅ Implement DataDependency Controller
-- ✅ Create plugin interface and manager
-- ✅ Implement Amoro plugin
-- ✅ Add comprehensive test suite
-
-### Phase 2: Advanced Features (Completed)
-- ✅ Dynamic plugin loading from external registry
-- ✅ Configuration management via ConfigMap
-- ✅ Health monitoring and error handling
-- ✅ Finalizer-based cleanup
-- ✅ Periodic DataSource updates
-
-### Phase 3: Testing and Validation (Completed)
-- ✅ Unit tests for all components
-- ✅ Integration tests with mock external systems
-- ✅ Stability testing (35 consecutive runs with 100% success rate)
-- ✅ Error handling and edge case testing
-
-## Testing Strategy
-
-### Detailed Implementation
-
-#### Binding Logic Implementation
-The system implements two types of binding mechanisms:
-
-**1. Static Binding**
-```go
-func (c *DataDependencyController) staticBinding(dsc *v1alpha1.DataSourceClaim, matchedDS *v1alpha1.DataSource) error {
-    // Critical: Update DSC status first for scheduler visibility
-    if err := c.updateDSCstatus(dsc); err != nil {
-        return fmt.Errorf("failed to update DSC status: %w", err)
-    }
-    
-    // Best effort: Add claim reference to DataSource
-    claimRef := &corev1.ObjectReference{
-        Kind:       "DataSourceClaim",
-        Namespace:  dsc.Namespace,
-        Name:       dsc.Name,
-        UID:        dsc.UID,
-    }
-    
-    return c.addClaimRefToDS(matchedDS, claimRef)
+	// Attributes provides extra metadata (e.g., access mode, specific snapshot ID).
+	// +optional
+	Attributes map[string]string `json:"attributes,omitempty"`
 }
 ```
 
-**2. Dynamic Binding**
-```go
-func (c *DataDependencyController) dynamicBinding(dsc *v1alpha1.DataSourceClaim) error {
-    // Query external system through plugin
-    clusters, err := c.pluginManager.SelectClusters(ctx, dsc)
-    if err != nil {
-        // Handle 404 errors (data not found) without retry
-        if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
-            klog.V(3).Infof("Data not found for DSC %s/%s, will not retry", dsc.Namespace, dsc.Name)
-            return nil
-        }
-        return fmt.Errorf("plugin query failed: %w", err)
-    }
-    
-    // Create new DataSource based on plugin response
-    ds := &v1alpha1.DataSource{
-        ObjectMeta: metav1.ObjectMeta{
-            Name:      generateDataSourceName(dsc),
-            Namespace: dsc.Namespace,
-            Labels:    generateDataSourceLabels(dsc),
-        },
-        Spec: v1alpha1.DataSourceSpec{
-            System:   dsc.Spec.System,
-            Type:     dsc.Spec.DataSourceType,
-            Name:     dsc.Spec.DataSourceName,
-            Locality: clusters,
-        },
-    }
-    
-    return c.Create(ctx, ds)
-}
-```
+### 2. DataSource: The System Cache
+`DataSource` (DS) is a **Cluster-scoped** resource automatically created by the Controller. **It acts strictly as a metadata cache object**, storing the results queried and resolved from external metadata centers (e.g., Amoro).
 
-#### Matching Algorithm
-```go
-func doesDataSourceMatchClaim(dsc *v1alpha1.DataSourceClaim, ds *v1alpha1.DataSource) bool {
-    // Ensure DataSource is not being deleted
-    if ds.DeletionTimestamp != nil {
-        return false
-    }
-    
-    // Exact match requirements
-    return dsc.Spec.System == ds.Spec.System &&
-           dsc.Spec.DataSourceType == ds.Spec.Type &&
-           dsc.Spec.DataSourceName == ds.Spec.Name &&
-           attributesEqual(ds.Spec.Attributes, dsc.Spec.Attributes)
-}
-```
-
-#### Placement Update Logic
-The controller automatically updates Karmada ResourceBinding objects to reflect data locality:
+**Design Highlights:**
+*   **As a Cache Layer:** The core value of the DS lies in minimizing external API calls. Multiple jobs across different namespaces depending on the same table will directly read from the same DS object, significantly boosting system efficiency.
+*   **Locality Storage:** The `Locality` field stores the resolved result indicating which clusters hold the data. **The DataDependencyController reads this field** to generate corresponding scheduling constraints (Affinity) and applies them to the workload. The scheduler does not read this object directly.
+*   **Retention Strategy:** The lifecycle is defined via the `ReclaimPolicy` field. In our design, **we prioritize the `Retain` policy**, meaning the DS object is preserved even when no jobs reference it. This allows future jobs to reuse the cache immediately, maximizing the cache hit rate and minimizing external I/O overhead.
 
 ```go
-func (c *DataDependencyController) injectPlacementAffinity(rb *workv1alpha2.ResourceBinding, dsClusterNames []string) error {
-    // Create cluster affinity based on data location
-    clusterAffinity := &policyv1alpha1.ClusterAffinity{
-        ClusterNames: dsClusterNames,
-    }
-    
-    // Update ResourceBinding placement
-    if rb.Spec.Placement == nil {
-        rb.Spec.Placement = &policyv1alpha1.Placement{}
-    }
-    rb.Spec.Placement.ClusterAffinity = clusterAffinity
-    
-    // Add annotation to track injection
-    if rb.Annotations == nil {
-        rb.Annotations = make(map[string]string)
-    }
-    rb.Annotations[PlacementInjectedAnnotation] = "true"
-    
-    return c.karmadaClient.WorkV1alpha2().ResourceBindings(rb.Namespace).Update(ctx, rb, metav1.UpdateOptions{})
+// DataSourceSpec defines the desired state of DataSource.
+type DataSourceSpec struct {
+	// ... (System, Type, Name fields identifying the source)
+
+	// Locality defines the resolved physical location of the data.
+	// Used by the controller to generate scheduling constraints.
+	// +required
+	Locality *DataSourceLocality `json:"locality"`
+
+	// ReclaimPolicy defines what happens when the last bound DSC is deleted.
+	// Defaults to "Retain" to maximize cache hit rate.
+	// +optional
+	ReclaimPolicy DataSourceReclaimPolicy `json:"reclaimPolicy,omitempty"`
+}
+
+// DataSourceLocality specifies the cached location information.
+type DataSourceLocality struct {
+	// ClusterNames is a list of cluster names where the cached data source information indicates availability.
+	// +required
+	ClusterNames []string `json:"clusterNames"`
 }
 ```
 
-### Test Coverage
-The implementation includes comprehensive testing with automated stability validation:
+### 3. Status & Observability
+The controller maintains object states via the Status field, primarily for **System Observability**.
 
-#### Test Structure
-1. **Unit Tests**: 
-   - Controller reconciliation logic
-   - Plugin interface and manager functionality
-   - Binding algorithm validation
-   - Error handling and edge cases
-   - Finalizer cleanup logic
+*   **DSC Status:** Records the `Phase` (Pending/Bound) and the bound `BoundDataSource` name. A `Bound` phase indicates that data location resolution is complete.
+*   **DS Status:** Records `ClaimRefs` (a list of all DSCs referencing this DS) and `BoundClaims` (the total count). **This provides administrators with a clear "Data Heatmap" view**, helping operators understand which data tables are frequently accessed by which workloads.
 
-2. **Integration Tests**:
-   - End-to-end workflow testing
-   - Plugin configuration management
-   - ResourceBinding placement updates
-   - Multi-cluster coordination
+```go
+// DataSourceStatus defines the observed state of DataSource.
+type DataSourceStatus struct {
+	// ClaimRefs tracks all DSCs utilizing this DataSource.
+	// Provides observability into which workloads are using this data cache.
+	// +optional
+	ClaimRefs []corev1.ObjectReference `json:"claimRefs,omitempty"`
 
-3. **Stability Tests**:
-   - Automated testing script (`hack/run_stability_tests.sh`)
-   - Configurable test runs (default 50, tested up to 35)
-   - Performance benchmarking and race condition detection
-   - Comprehensive logging and reporting
+	// BoundClaims is the count of active claims.
+	// +optional
+	BoundClaims int32 `json:"boundClaims,omitempty"`
 
-#### Stability Testing Script
-```bash
-#!/bin/bash
-# Stability Test Script for Go Projects
-TEST_RUNS=${1:-50}
-TEST_DIR=${2:-$(pwd)}
+    // ... Conditions
+}
 
-for i in $(seq 1 $TEST_RUNS); do
-    start_time=$(date +%s)
-    if go test -v ./... >> "$LOG_FILE" 2>&1; then
-        passed_count=$((passed_count + 1))
-        echo "Run $i: PASSED (${duration}s)"
-    else
-        failed_count=$((failed_count + 1))
-        echo "Run $i: FAILED (${duration}s)"
-    fi
-done
+// DataSourceClaimStatus defines the observed state of DataSourceClaim.
+type DataSourceClaimStatus struct {
+	// Phase indicates if the claim has been resolved and bound.
+	// +default="Pending"
+	Phase DSCPhase `json:"phase"`
 
-# Generate comprehensive summary report
-echo "Success rate: $(echo "scale=2; $passed_count * 100 / $TEST_RUNS" | bc)%"
-echo "Average time per run: $(echo "scale=2; $total_duration / $TEST_RUNS" | bc)s"
+	// BoundDataSource points to the specific DataSource object providing locality info.
+	// +optional
+	BoundDataSource string `json:"boundDataSource,omitempty"`
+}
 ```
+## Architecture & Workflow
 
-### Test Results
-```
-Stability Test Results (Latest Run):
-- Total Runs: 35
-- Success Rate: 100%
-- Total Time: 18 seconds
-- Average Time per Run: 0.52 seconds
-- No race conditions detected
-- All edge cases handled correctly
-- Memory usage stable across runs
-- No resource leaks detected
+### 1. Architectural Overview
+The core component of this framework is the **DataDependencyController**. Operating on the control plane, it serves as the bridge between user logical requirements (`DataSourceClaim`) and physical scheduling decisions (Karmada Scheduler).
 
-Test Coverage Areas:
-✅ Static binding workflow
-✅ Dynamic binding with plugin queries
-✅ Error handling (404, network failures, timeouts)
-✅ Finalizer-based cleanup
-✅ ConfigMap configuration updates
-✅ ResourceBinding placement injection
-✅ Multi-cluster coordination
-✅ Plugin health monitoring
-✅ Concurrent access scenarios
-```
+*   **Inputs:** User-submitted `DataSourceClaim` (DSC) and external metadata from the data lake (e.g., Amoro).
+*   **Intermediate State:** The `DataSource` (DS) object maintained within the cluster, acting as a metadata cache.
+*   **Outputs:** Modifications to Karmada's `ResourceBinding` (RB), specifically the injection of `ClusterAffinity` constraints.
 
-## Deployment Guide
+![](images/datadependency_controller_workflow.png)
+### 2. Controller State Machine Logic
+The core logic of the DataDependencyController is built around a rigorous state machine based on the `DataSourceClaim.Status.Phase` field. As illustrated in the workflow diagram, the Reconcile Loop is divided into two primary branches: **Pending (Discovery & Binding)** and **Bound (Maintenance & Injection)**.
 
-### Prerequisites
-1. **Volcano Global** deployed and running (see main [Deploy Guide](../deploy/README.md))
-2. **Karmada** control plane with worker clusters registered
-3. **External data systems** (e.g., Amoro, HDFS) accessible from controller
-4. **Network connectivity** between Volcano Global and external data systems
-5. **RBAC permissions** for DataDependency CRDs and ResourceBinding updates
+**(1) Handle Pending: Discovery & Binding**
+When a DSC is in the `Pending` state, the controller's goal is to resolve data location and establish a binding.
+*   **Cache Lookup Strategy:** The controller first attempts to find a matching `DataSource` (DS) within the cluster.
+    *   **Cache Hit:** If a match is found, the controller reuses the existing DS and proceeds directly to static binding. This achieves **O(1)** reuse efficiency.
+    *   **Cache Miss:** If not found, **Dynamic Binding** is triggered.
+*   **Dynamic Binding:**
+    1.  The Plugin Manager queries the Amoro API.
+    2.  The returned `metadata-location` is parsed and mapped to a Cluster List using the ConfigMap.
+    3.  **Create DataSource:** A new DS object (protected by a Finalizer) is created and persisted in the cluster.
+*   **Static Binding:** The controller atomically updates the DSC's `BoundDataSource` field and increments the DS's `ClaimRefs` counter.
 
-### Deployment Steps
+**(2) Handle Bound: Injection & Correction**
+When a DSC is in the `Bound` state, the controller applies topology constraints to the workload and monitors state consistency.
+*   **Consistency Verification:** Every reconciliation begins by verifying if the DSC still matches the bound DS (`doesDataSourceMatchClaim`).
+    *   If the user modifies the logical table name in the DSC, or if the DS is marked for deletion, this check fails, triggering the **Unbinding** process.
+*   **Affinity Injection:**
+    *   The controller locates the Karmada `ResourceBinding` (RB) associated with the DSC.
+    *   **Gatekeeping Mechanism:** It checks if the RB has already been processed. If not, the controller translates the `Locality` info from the DS into `ClusterAffinity`, injects it into the RB, and adds an Annotation to prevent duplicate processing. This ensures scheduling constraints are applied before the Karmada Scheduler finalizes placement.
+*   **Unbinding & Rescheduling:**
+    *   Upon detecting an invalid binding, the controller resets the DSC status to `Pending`.
+    *   It cleans up affinity rules in the RB and triggers **Rescheduling** in Karmada, ensuring the workload is not scheduled to an incorrect location.
 
-#### 1. Deploy DataDependency CRDs
-```bash
-# Switch to Karmada host kubeconfig
-export KUBECONFIG=$HOME/.kube/karmada.config
+### 3. Lifecycle Management
+To ensure system robustness under concurrency and edge cases, we have designed a strict lifecycle management process for both `DataSourceClaim` (DSC) and `DataSource` (DS). The following flows detail how specific operations trigger different branches of the controller logic.
 
-# Apply DataDependency CRDs to Karmada API server
-kubectl --context karmada-apiserver apply -f docs/deploy/crds/datadependency.volcano.sh_datasourceclaims.yaml
-kubectl --context karmada-apiserver apply -f docs/deploy/crds/datadependency.volcano.sh_datasources.yaml
+**A. DSC Lifecycle**
 
-# Verify CRDs are installed
-kubectl --context karmada-apiserver get crd | grep datadependency
-```
+**1. DSC Creation (Creation & Gatekeeping)**
+*   **Scenario:** A user submits a DSC, followed by the creation of a workload (e.g., Deployment).
+*   **Flow:**
+    1.  **Pending Phase:** The controller initializes the DSC as `Pending` and enters the `handlePending` branch.
+    2.  **Binding:** Executes `findMatchedDS`.
+        *   **Cache Miss:** Enters `dynamicBinding` -> Queries Plugin -> **Creates DS** -> `staticBinding`.
+        *   **Cache Hit:** Directly enters `staticBinding`.
+    3.  **State Transition:** Upon successful binding, the DSC status changes to `Bound`.
+    4.  **Gatekeeping:** Karmada creates a `ResourceBinding` (RB) for the workload. The controller captures this event, re-queues the DSC, enters `handleBound` -> `handlePlacementUpdate`, and executes `injectPlacementAffinity` to apply scheduling constraints.
 
-#### 2. Configure Plugin ConfigMap
-```bash
-# Apply the default plugin configuration
-kubectl --context karmada-host apply -f docs/deploy/volcano-global-datasource-plugins-configmap.yaml
+**2. DSC Modification**
+Modifications are handled differently depending on the changed field:
 
-# Customize the configuration for your environment
-kubectl --context karmada-host edit configmap volcano-global-datasource-plugins -n volcano-global
-```
+*   **Case I: Workload Reference Update**
+    *   *Scenario:* The user modifies the DSC to point to a different Deployment, but the data source remains the same.
+    *   *Flow:* Enters `handleBound` branch.
+    *   *Check:* `doesDataSourceMatchClaim` returns **True** (Data source unchanged).
+    *   *Action:* Enters `handlePlacementUpdate`. The controller detects the new workload's RB and executes `injectPlacementAffinity`.
 
-**Plugin Configuration Example:**
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: volcano-global-datasource-plugins
-  namespace: volcano-global
-data:
-  amoro: |
-    {
-      "system": "amoro",
-      "endpoint": {
-        "url": "http://your-amoro-server.com",
-        "port": 1630,
-        "auth": {
-          "type": "basic",
-          "username": "admin",
-          "password": "secret"
-        }
-      },
-      "locationMapping": {
-        "s3://warehouse-dc1/": ["cluster-us-west", "cluster-us-central"],
-        "s3://warehouse-dc2/": ["cluster-us-east"],
-        "hdfs://namenode-dc3/": ["cluster-eu-west"]
-      },
-      "retryConfig": {
-        "maxRetries": 3,
-        "initialBackoff": "1s",
-        "maxBackoff": "30s",
-        "backoffMultiplier": 2.0,
-        "timeout": "30s"
-      }
-    }
-```
+*   **Case II: Data Source Reference Update**
+    *   *Scenario:* The user changes the dependency from Table A to Table B.
+    *   *Flow:* Enters `handleBound` branch.
+    *   *Check:* `doesDataSourceMatchClaim` returns **False** (Name mismatch).
+    *   *Action:* Enters **`handleUnbinding`** branch.
+        1.  **Step 1:** `ResetDSCStatus` resets DSC to `Pending`.
+        2.  **Step 2:** `triggerRescheduling` cleans up the old RB's affinity rules.
+        3.  **Step 3:** `cleanup DS status` decrements the old DS's reference count.
+    *   *Result:* The next reconciliation will re-enter `handlePending` to find a binding for Table B.
 
-#### 3. Deploy Volcano Global Controller
-```bash
-# Deploy the controller manager with DataDependency module
-kubectl --context karmada-host apply -f docs/deploy/volcano-global-controller-manager.yaml
+**3. DSC Deletion**
+*   **Scenario:** The user deletes the DSC.
+*   **Flow:** The controller detects that `DeletionTimestamp` is set.
+*   **Action:**
+    1.  Executes cleanup logic: Decrements the `ClaimRefs` counter of the bound DS.
+    2.  **Remove Finalizer:** Only after successful cleanup does the controller remove the DSC's Finalizer, allowing the API Server to physically delete the object.
 
-# Verify controller is running
-kubectl --context karmada-host get pods -n volcano-global -l app=volcano-global-controller-manager
-```
+**B. DS Lifecycle**
 
-#### 4. Verify Installation
-```bash
-# Check controller logs for DataDependency initialization
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -i datadependency
+**1. DS Creation**
+*   **Trigger:** Initiated during the `dynamicBinding` process of a DSC.
+*   **Key Point:** The DS is injected with a **Finalizer** immediately upon creation, ensuring the cached metadata is protected until no DSCs reference it.
 
-# Test plugin connectivity
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -i "plugin.*initialized"
-```
+**2. DS Update / Data Migration (Auto-Update & Self-Healing)**
+*   **Scenario:** Underlying data migrates (e.g., Amoro Rebalance), and the plugin detects a change, updating the DS's `Locality`.
+*   **Flow:**
+    1.  **Trigger:** The DS update event re-queues all associated DSCs.
+    2.  **Maintenance:** DSC enters `handleBound`. `doesDataSourceMatchClaim` still returns **True**.
+    3.  **Action:** Enters `handlePlacementUpdate` -> `findAssociatedRB`.
+    4.  **Rescheduling:** The controller detects a discrepancy between the DS `Locality` and the RB's current Affinity. It executes `triggerRescheduling`, updating the RB constraints to force Karmada to move the workload, implementing **"Compute Follows Data."**
 
-### Complete Usage Examples
+**3. DS Deletion (Manual Deletion & Safety)**
+*   **Scenario:** An operator manually executes `kubectl delete ds`.
+*   **Flow:**
+    1.  **Interception:** The controller observes the DS `DeletionTimestamp`. The `updateDataSource` handler re-queues all associated DSCs.
+    2.  **Forced Unbinding:** DSC enters the `handleBound` branch. `doesDataSourceMatchClaim` contains a special check: **If the DS is being deleted, it is considered a mismatch**, returning **False**.
+    3.  **Unbinding Execution:** The DSC is forced into the `handleUnbinding` branch, performing unbinding and RB cleanup.
+    4.  **Hard Deletion:** When the last associated DSC completes unbinding (`removeClaimRefFromDS`), the controller detects that the DS reference count is zero and the DS is marked for deletion. It then removes the DS Finalizer, completing the physical deletion.
 
-#### Example 1: Dynamic Binding with Amoro
-This example demonstrates automatic data discovery and binding:
-
-```yaml
-# 1. DataSourceClaim for dynamic binding
-apiVersion: datadependency.volcano.sh/v1alpha1
-kind: DataSourceClaim
-metadata:
-  name: ml-training-data
-  namespace: default
-spec:
-  system: "amoro"
-  dataSourceType: "table"
-  dataSourceName: "warehouse.ml.training_dataset"
-  workload:
-    apiVersion: "apps/v1"
-    kind: "Deployment"
-    name: "ml-training"
-    namespace: "default"
-  attributes:
-    partition: "2024-01"
-
----
-# 2. Workload that requires the data
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ml-training
-  labels:
-    app: ml-training
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: ml-training
-  template:
-    metadata:
-      labels:
-        app: ml-training
-    spec:
-      containers:
-      - name: trainer
-        image: tensorflow/tensorflow:latest
-        env:
-        - name: DATASET_PATH
-          value: "warehouse.ml.training_dataset"
-        - name: PARTITION
-          value: "2024-01"
-
----
-# 3. PropagationPolicy for data-aware scheduling
-apiVersion: policy.karmada.io/v1alpha1
-kind: PropagationPolicy
-metadata:
-  name: ml-training-policy
-  namespace: default
-spec:
-  resourceSelectors:
-    - apiVersion: apps/v1
-      kind: Deployment
-      name: ml-training
-  placement:
-    clusterAffinity:
-      clusterNames: []  # Will be automatically updated by DataDependency controller
-    replicaScheduling:
-      replicaDivisionPreference: Aggregated
-      replicaSchedulingType: Divided
-```
-
-#### Example 2: Static Binding with Pre-existing DataSource
-This example shows binding to a manually created DataSource:
-
-```yaml
-# 1. Pre-existing DataSource
-apiVersion: datadependency.volcano.sh/v1alpha1
-kind: DataSource
-metadata:
-  name: analytics-data-source
-  namespace: default
-  labels:
-    datadependency.volcano.sh/system: "amoro"
-    datadependency.volcano.sh/type: "table"
-    datadependency.volcano.sh/name: "warehouse.analytics.user_events"
-spec:
-  system: "amoro"
-  type: "table"
-  name: "warehouse.analytics.user_events"
-  locality:
-    - "cluster-us-west"
-    - "cluster-us-east"
-  attributes:
-    size: "500GB"
-    format: "parquet"
-  reclaimPolicy: "Retain"
-
----
-# 2. DataSourceClaim that will bind to the above DataSource
-apiVersion: datadependency.volcano.sh/v1alpha1
-kind: DataSourceClaim
-metadata:
-  name: analytics-claim
-  namespace: default
-spec:
-  system: "amoro"
-  dataSourceType: "table"
-  dataSourceName: "warehouse.analytics.user_events"
-  workload:
-    apiVersion: "batch/v1"
-    kind: "Job"
-    name: "analytics-job"
-    namespace: "default"
-
----
-# 3. Analytics workload
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: analytics-job
-  labels:
-    app: analytics-processor
-spec:
-  template:
-    metadata:
-      labels:
-        app: analytics-processor
-    spec:
-      containers:
-      - name: processor
-        image: spark:3.4.0
-        command: ["spark-submit"]
-        args: ["--class", "Analytics", "analytics.jar"]
-      restartPolicy: Never
-```
-
-#### Example 3: Multi-System Data Dependencies
-This example shows a workload that depends on data from multiple systems:
-
-```yaml
-# 1. Amoro data claim
-apiVersion: datadependency.volcano.sh/v1alpha1
-kind: DataSourceClaim
-metadata:
-  name: amoro-data-claim
-  namespace: default
-spec:
-  system: "amoro"
-  dataSourceType: "table"
-  dataSourceName: "warehouse.sales.transactions"
-  workload:
-    apiVersion: "apps/v1"
-    kind: "Deployment"
-    name: "multi-source-analytics"
-    namespace: "default"
-
----
-# 2. HDFS data claim (future plugin)
-apiVersion: datadependency.volcano.sh/v1alpha1
-kind: DataSourceClaim
-metadata:
-  name: hdfs-data-claim
-  namespace: default
-spec:
-  system: "hdfs"
-  dataSourceType: "directory"
-  dataSourceName: "/data/logs/2024"
-  workload:
-    apiVersion: "apps/v1"
-    kind: "Deployment"
-    name: "multi-source-analytics"
-    namespace: "default"
-
----
-# 3. Multi-source analytics workload
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: multi-source-analytics
-  labels:
-    app: multi-source-analytics
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: multi-source-analytics
-  template:
-    metadata:
-      labels:
-        app: multi-source-analytics
-    spec:
-      containers:
-      - name: analytics
-        image: apache/spark:3.4.0
-        env:
-        - name: AMORO_TABLE
-          value: "warehouse.sales.transactions"
-        - name: HDFS_PATH
-          value: "/data/logs/2024"
-```
-
-### Monitoring and Troubleshooting
-
-#### Check DataSourceClaim Status
-```bash
-# List all DataSourceClaims
-kubectl --context karmada-apiserver get datasourceclaims
-
-# Get detailed status
-kubectl --context karmada-apiserver describe datasourceclaim ml-training-data
-
-# Check binding status
-kubectl --context karmada-apiserver get datasourceclaims -o jsonpath='{.items[*].status.phase}'
-```
-
-#### Check DataSource Status
-```bash
-# List all DataSources
-kubectl --context karmada-apiserver get datasources
-
-# Check locality information
-kubectl --context karmada-apiserver get datasources -o jsonpath='{.items[*].spec.locality}'
-```
-
-#### Monitor Controller Logs
-```bash
-# General controller logs
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager
-
-# DataDependency specific logs
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -i datadependency
-
-# Core handler function logs
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -E "(staticBinding|dynamicBinding|doesDataSourceMatchClaim)"
-
-# Plugin manager logs
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -E "(PluginManager|RegisterPlugin|GetPlugin|LoadConfig)"
-
-# Amoro plugin specific logs
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -E "(AmoroPlugin|queryAmoro|queryWithRetry|mapLocationToClusters)"
-
-# Binding and reconciliation logs
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -E "(Reconcile|binding|claim.*bound|placement.*updated)"
-
-# Error and retry logs
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -E "(error|failed|retry|timeout)"
-
-# Health check logs
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -E "(health.*check|IsHealthy|plugin.*healthy)"
-
-# Configuration and initialization logs
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -E "(Init|config.*loaded|plugin.*initialized)"
-
-# Performance and timing logs
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -E "(duration|latency|took.*ms|processing.*time)"
-```
-
-#### Common Issues and Solutions
-
-**Issue 1: Plugin Connection Failures**
-```bash
-# Check plugin configuration
-kubectl --context karmada-host get configmap volcano-global-datasource-plugins -n volcano-global -o yaml
-
-# Verify network connectivity
-kubectl --context karmada-host exec -n volcano-global deployment/volcano-global-controller-manager -- curl -v http://your-amoro-server.com:1630/api/v1/health
-```
-
-**Issue 2: DataSourceClaim Stuck in Pending**
-```bash
-# Check controller logs for errors
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -A5 -B5 "failed to query\|plugin error"
-
-# Verify plugin health
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep "health check"
-```
-
-**Issue 3: ResourceBinding Not Updated**
-```bash
-# Check ResourceBinding status
-kubectl --context karmada-apiserver get resourcebinding -o yaml
-
-# Verify placement injection
-kubectl --context karmada-apiserver get resourcebinding -o jsonpath='{.items[*].metadata.annotations.datadependency\.volcano\.sh/placement-injected}'
-```
-
-## Future Enhancements
-
-### Short Term
-- Support for additional data systems (HDFS, Iceberg, Delta Lake)
-- Advanced data partitioning and filtering
-- Data freshness and quality metrics
-- Enhanced monitoring and observability
-
-### Long Term
-- Data lineage tracking
-- Automatic data replication recommendations
-- Cost optimization based on data transfer patterns
-- Integration with data governance frameworks
-
-## Risks and Mitigations
-
-### Risk 1: External System Availability
-**Mitigation**: Implement circuit breaker pattern, health checks, and graceful degradation
-
-### Risk 2: Configuration Complexity
-**Mitigation**: Provide comprehensive documentation, validation, and default configurations
-
-### Risk 3: Performance Impact
-**Mitigation**: Implement caching, batching, and asynchronous processing
-
-### Risk 4: Security Concerns
-**Mitigation**: Support multiple authentication methods, secure credential storage, and audit logging
-
-## Conclusion
-
-The data-aware dependency scheduling system provides a robust foundation for optimizing workload placement based on data locality. The implementation demonstrates:
-
-- **Comprehensive Architecture**: Well-designed components with clear separation of concerns
-- **Extensible Plugin System**: Support for multiple data storage systems
-- **Production Ready**: Extensive testing with 100% stability validation
-- **Operational Excellence**: Comprehensive deployment guides and monitoring capabilities
-
-This system enables organizations to significantly improve performance and reduce costs by ensuring workloads run where their data is located, while providing the flexibility to integrate with diverse data storage ecosystems.
