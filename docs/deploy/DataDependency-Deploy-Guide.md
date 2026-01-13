@@ -120,10 +120,59 @@ volumes:
       name: volcano-global-datasource-plugins
 ```
 
-You can apply these changes either by editing `docs/deploy/volcano-global-controller-manager.yaml` and re-applying it:
+The following is a complete yaml file example that has been configured:
 
-```bash
-kubectl --context karmada-host apply -f docs/deploy/volcano-global-controller-manager.yaml
+```yaml
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: volcano-global-controller-manager
+  namespace: volcano-global
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: volcano-global-controller-manager
+  template:
+    metadata:
+      labels:
+        app: volcano-global-controller-manager
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: volcano-global-controllers-manager
+          image: volcano-global-controller-manager:test
+          args:
+            - --kubeconfig=/etc/kubeconfig/karmada.config
+            - --leader-elect=false
+            - --leader-elect-resource-namespace=volcano-global
+            - --logtostderr
+            - --enable-healthz=true
+            - --dispatch-period=1s
+            # - --controllers=dispatcher
+            # Uncomment the following lines to enable DataDependency features
+            - --controllers=dispatcher,datadependency-controller
+            - --feature-gates=DataDependencyAwareness=true
+            - -v=5
+            - 2>&1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PLUGIN_CONFIG_PATH
+              value: "/etc/volcano-global/plugins"
+          volumeMounts:
+            - name: webhook-config
+              mountPath: /etc/kubeconfig
+              readOnly: true
+            - name: plugin-config
+              mountPath: /etc/volcano-global/plugins
+              readOnly: true
+      volumes:
+        - name: webhook-config
+          secret:
+            secretName: karmada-webhook-config
+        - name: plugin-config
+          configMap:
+            name: volcano-global-datasource-plugins
 ```
 
 ### 4. Verify DataDependency Controller
@@ -171,20 +220,20 @@ Create a DataSourceClaim that requests access to a specific data source:
 apiVersion: datadependency.volcano.sh/v1alpha1
 kind: DataSourceClaim
 metadata:
-  name: my-data-claim
+  name: dsc-dynamic-binding-test
   namespace: default
 spec:
-  # Data system type (must match plugin configuration)
+  # Required: underlying data system
   system: "amoro"
-  # Type of data source
+  # Required: category of the data source within the system
   dataSourceType: "table"
-  # Logical name of the data source
-  dataSourceName: "dc1.database.table_name"
-  # Workload that this claim is associated with
+  # Required: logical name of the data source to claim
+  dataSourceName: "prod.db.user"
+  # Required: workload that this claim is associated with
   workload:
     apiVersion: "apps/v1"
     kind: "Deployment"
-    name: "my-app"
+    name: "test-app"
     namespace: "default"
 ```
 
@@ -196,25 +245,22 @@ Deploy a workload that depends on data:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: my-app
+  name: test-app
   labels:
-    app: my-app
+    app: test-app
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
-      app: my-app
+      app: test-app
   template:
     metadata:
       labels:
-        app: my-app  
+        app: test-app
     spec:
       containers:
-      - name: data-processor
-        image: my-data-processing-app:latest
-        env:
-        - name: DATA_SOURCE
-          value: "dc1.database.table_name"
+      - image: nginx
+        name: nginx
 ```
 
 ### Example 3: ResourceBinding for Data-Aware Scheduling
@@ -227,19 +273,23 @@ Note: The controller does not update the PropagationPolicy itself. It updates th
 apiVersion: policy.karmada.io/v1alpha1
 kind: PropagationPolicy
 metadata:
-  name: my-app-policy
+  name: test-app
   namespace: default
 spec:
+  # Select DataSourceClaim resources
   resourceSelectors:
     - apiVersion: apps/v1
       kind: Deployment
-      name: my-app
+      name: test-app
+  # Propagate to specified clusters
   placement:
     clusterAffinity:
-      clusterNames: []  
+      clusterNames:
+    # Replica scheduling strategy
     replicaScheduling:
       replicaDivisionPreference: Aggregated
       replicaSchedulingType: Divided
+
 ```
 
 ## Complete Example Deployment
@@ -325,10 +375,7 @@ kubectl --context karmada-apiserver describe datasource <datasource-name>
 kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager -f
 
 # Filter for DataDependency-specific logs
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -E "(DataSource|DataDependency)"
-
-# Webhook manager logs
-kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-webhook-manager -f
+kubectl --context karmada-host logs -n volcano-global -l app=volcano-global-controller-manager | grep -v 'session\.go' | grep -v 'dispatcher\.go' | grep -v 'capacity\.go' | grep -v 'reflector\.go' | grep -v 'plugin_manager\.go' | grep -v 'amoro\.go'
 ```
 
 ## Amoro Test Environment Configuration
@@ -338,6 +385,8 @@ This section describes the specific configuration for our Amoro test environment
 ### Test Environment Setup
 
 Our test environment uses the following Amoro configuration:
+
+![](../imgs/datadependency_amoro1.png)
 
 ```yaml
 apiVersion: v1
