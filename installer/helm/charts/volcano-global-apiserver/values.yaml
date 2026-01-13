@@ -1,0 +1,17 @@
+# CRD configuration
+crds:
+  enabled: true
+  upgradeStrategy: "manual"  # manual | auto
+
+# Webhook configuration
+webhooks:
+  enabled: true
+
+# Resource interpreters configuration
+resourceInterpreters:
+  enabled: true
+
+# Propagation policies configuration
+propagationPolicies:
+  enabled: true
+  deletionProtection: false
