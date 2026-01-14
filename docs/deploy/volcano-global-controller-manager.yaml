@@ -23,6 +23,8 @@ spec:
             - --leader-elect-resource-namespace=volcano-global
             - --logtostderr
             - --enable-healthz=true
+            - --healthz-address=$(MY_POD_IP):11251
+            - --listen-address=$(MY_POD_IP):9090
             - --dispatch-period=1s
             - --controllers=dispatcher
             # Uncomment the following lines to enable DataDependency features
@@ -31,10 +33,35 @@ spec:
             - -v=5
             - 2>&1
           imagePullPolicy: IfNotPresent
+          livenessProbe:
+            failureThreshold: 5
+            initialDelaySeconds: 60
+            periodSeconds: 3
+            successThreshold: 1
+            httpGet:
+              path: /healthz
+              port: 11251
+              scheme: HTTP
+            timeoutSeconds: 5
+          readinessProbe:
+            failureThreshold: 5
+            initialDelaySeconds: 3
+            periodSeconds: 3
+            successThreshold: 1
+            httpGet:
+              path: /healthz
+              port: 11251
+              scheme: HTTP
+            timeoutSeconds: 5
           volumeMounts:
             - name: webhook-config
               mountPath: /etc/kubeconfig
               readOnly: true
+          env:
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
       volumes:
         - name: webhook-config
           secret:

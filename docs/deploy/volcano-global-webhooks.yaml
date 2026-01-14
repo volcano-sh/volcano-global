@@ -19,3 +19,55 @@ webhooks:
         scope: "Namespaced"
     sideEffects: None
     timeoutSeconds: 3
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: volcano-admission-service-jobs-mutate
+webhooks:
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      url: https://volcano-global-webhook.volcano-global.svc:443/jobs/mutate
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    name: mutatejob.volcano.sh
+    reinvocationPolicy: Never
+    rules:
+      - apiGroups:
+          - batch.volcano.sh
+        apiVersions:
+          - v1alpha1
+        operations:
+          - CREATE
+        resources:
+          - jobs
+        scope: Namespaced
+    sideEffects: NoneOnDryRun
+    timeoutSeconds: 10
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: volcano-admission-service-jobs-validate
+webhooks:
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      url: https://volcano-global-webhook.volcano-global.svc:443/jobs/validate
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    name: validatejob.volcano.sh
+    rules:
+      - apiGroups:
+          - batch.volcano.sh
+        apiVersions:
+          - v1alpha1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - jobs
+        scope: Namespaced
+    sideEffects: NoneOnDryRun
+    timeoutSeconds: 10
