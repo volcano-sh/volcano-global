@@ -18,7 +18,9 @@ package mutating
 
 import (
 	"fmt"
+	"reflect"
 
+	"github.com/karmada-io/karmada/pkg/apis/policy/v1alpha1"
 	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
 	"gomodules.xyz/jsonpatch/v2"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -29,6 +31,7 @@ import (
 	"volcano.sh/volcano/pkg/webhooks/router"
 	"volcano.sh/volcano/pkg/webhooks/util"
 
+	"volcano.sh/volcano-global/pkg/dispatcher/api"
 	"volcano.sh/volcano-global/pkg/webhooks/decoder"
 	"volcano.sh/volcano-global/pkg/workload"
 )
@@ -59,9 +62,9 @@ var service = &router.AdmissionService{
 }
 
 func ResourceBindings(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResponse {
-	if ar.Request == nil || ar.Request.Operation != admissionv1.Create {
-		// This error should not be happened; We have set the rule for CREATE operation only.
-		return util.ToAdmissionResponse(fmt.Errorf("expect operation to be '%s'", admissionv1.Create))
+	if ar.Request == nil || (ar.Request.Operation != admissionv1.Create && ar.Request.Operation != admissionv1.Update) {
+		// This error should not be happened; We have set the rule for CREATE and UPDATE operation.
+		return util.ToAdmissionResponse(fmt.Errorf("expect operation to be '%s', but got '%s'", admissionv1.Create+" or "+admissionv1.Update, ar.Request.Operation))
 	}
 	klog.V(3).Infof("Mutating %s operation for ResourceBinding <%s/%s>.",
 		ar.Request.Operation, ar.Request.Namespace, ar.Request.Name)
@@ -74,7 +77,8 @@ func ResourceBindings(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResp
 	response := &admissionv1.AdmissionResponse{Allowed: true}
 
 	// This should not happen, the `suspend` will update to true by this webhook when create the resourceBinding.
-	if rb.Spec.SchedulingSuspended() {
+	if rb.Spec.Suspension != nil && rb.Spec.Suspension.Dispatching != nil && *rb.Spec.Suspension.Dispatching {
+		klog.V(3).Infof("ResourceBinding <%s/%s> is alrady suspended.", rb.Namespace, rb.Name)
 		return response
 	}
 
@@ -91,16 +95,54 @@ func ResourceBindings(ar admissionv1.AdmissionReview) *admissionv1.AdmissionResp
 		return response
 	}
 
-	// Create the patch, update the suspend field.
-	response.Patch, err = json.Marshal([]jsonpatch.Operation{
-		{Operation: "add", Path: "/spec/suspension", Value: map[string]interface{}{
-			"scheduling": true,
-		}},
-	})
-	if err != nil {
-		return util.ToAdmissionResponse(err)
+	if rb.Annotations != nil {
+		if dc, ok := rb.Annotations[api.LastDispatchedContentAnnotationKey]; ok {
+			// Check willDispatchContent is equal LastDispatchedContent, skip suspend if.
+			willDispatchContent := &api.DispatchContent{
+				ResourceRequest: rb.Spec.ReplicaRequirements.ResourceRequest,
+			}
+			for _, cluster := range rb.Spec.Clusters {
+				willDispatchContent.Replicas += cluster.Replicas
+			}
+			lastDispatchedContent := &api.DispatchContent{}
+			if err = json.Unmarshal([]byte(dc), lastDispatchedContent); err != nil {
+				klog.Errorf("Failed to unmarshal ResourceBinding <%s/%s> last dispatched content, err: %v.", rb.Namespace, rb.Name, err)
+				return util.ToAdmissionResponse(err)
+			}
+			if reflect.DeepEqual(lastDispatchedContent, willDispatchContent) {
+				klog.V(3).Infof("ResourceBinding <%s/%s> will dispatch content is euqal last dispatched content, skip suspend it.", rb.Namespace, rb.Name)
+				return response
+			}
+			klog.V(3).Infof("ResourceBinding <%s/%s> update first pass volcano-global dispatch.", rb.Namespace, rb.Name)
+		}
 	}
 
+	// Create the patch, update the suspend field.
+	if rb.Spec.Suspension != nil {
+		rb.Spec.Suspension.Dispatching = ptr.To(true)
+	} else {
+		rb.Spec.Suspension = &workv1alpha2.Suspension{
+			Suspension: v1alpha1.Suspension{
+				Dispatching: ptr.To(true),
+			},
+		}
+	}
+	marshaledBytes, err := json.Marshal(rb)
+	if err != nil {
+		klog.Errorf("Failed to marshal ResourceBinding <%s/%s>, err: %v", rb.Namespace, rb.Name, err)
+		return util.ToAdmissionResponse(err)
+	}
+	patches, err := jsonpatch.CreatePatch(ar.Request.Object.Raw, marshaledBytes)
+	if err != nil {
+		klog.Errorf("Failed to create patch for ResourceBinding <%s/%s>, err: %v", rb.Namespace, rb.Name, err)
+		return util.ToAdmissionResponse(err)
+	}
+	response.Patch, err = json.Marshal(patches)
+	if err != nil {
+		klog.Errorf("Failed to marshal ResourceBinding patches <%s/%s>, err: %v", rb.Namespace, rb.Name, err)
+		return util.ToAdmissionResponse(err)
+	}
+	klog.V(3).Infof("Patch content for ResourceBinding <%s/%s> is <%s>.", rb.Namespace, rb.Name, string(response.Patch))
 	response.PatchType = ptr.To(admissionv1.PatchTypeJSONPatch)
 	return response
 }
