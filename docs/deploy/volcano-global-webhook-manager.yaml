@@ -20,7 +20,7 @@ spec:
         - name: volcano-global-webhook-manager
           args:
             - --kubeconfig=/etc/kubeconfig/karmada.config
-            - --enabled-admission=/resourcebindings/mutate
+            - --enabled-admission=/resourcebindings/mutate,/jobs/mutate,/jobs/validate
             - --tls-cert-file=/admission.local.config/certificates/tls.crt
             - --tls-private-key-file=/admission.local.config/certificates/tls.key
             - --ca-cert-file=/admission.local.config/certificates/ca.crt
@@ -28,11 +28,33 @@ spec:
             - --webhook-namespace=volcano-global
             - --logtostderr
             - --enable-healthz=true
+            - --healthz-address=$(MY_POD_IP):11251
+            - --listen-address=$(MY_POD_IP)
             - --port=8443
             - -v=5
             - 2>&1
           image: volcanosh/volcano-global-webhook-manager:latest
           imagePullPolicy: IfNotPresent
+          livenessProbe:
+            failureThreshold: 5
+            initialDelaySeconds: 60
+            periodSeconds: 3
+            successThreshold: 1
+            httpGet:
+              path: /healthz
+              port: 11251
+              scheme: HTTPS
+            timeoutSeconds: 5
+          readinessProbe:
+            failureThreshold: 5
+            initialDelaySeconds: 3
+            periodSeconds: 3
+            successThreshold: 1
+            httpGet:
+              path: /healthz
+              port: 11251
+              scheme: HTTPS
+            timeoutSeconds: 5
           volumeMounts:
             - mountPath: /admission.local.config/certificates
               name: admission-certs
@@ -40,6 +62,11 @@ spec:
             - name: webhook-config
               mountPath: /etc/kubeconfig
               readOnly: true
+          env:
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
       volumes:
         - name: webhook-config
           secret:
@@ -100,7 +127,7 @@ metadata:
 rules:
   - apiGroups: [ "" ]
     resources: [ "secrets" ]
-    verbs: [ "create", "list" ]
+    verbs: [ "create", "get", "list" ]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

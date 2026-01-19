@@ -18,6 +18,9 @@ RELEASE_DIR=_output/release
 REPO_PATH=volcano.sh/volcano-global
 IMAGE_PREFIX=volcanosh
 
+CRD_OPTIONS ?= "crd:crdVersions=v1,generateEmbeddedObjectMeta=true"
+CRD_OPTIONS_EXCLUDE_DESCRIPTION=${CRD_OPTIONS}",maxDescLen=0"
+
 CC ?= "gcc"
 BUILDX_OUTPUT_TYPE ?= "docker"
 
@@ -100,3 +103,29 @@ lint-licenses:
 .PHONY: licenses-check
 licenses-check: mirror-licenses
 	hack/licenses-check.sh
+
+# find or download controller-gen
+# download controller-gen if necessary
+controller-gen:
+ifeq (, $(shell which controller-gen))
+	@{ \
+	set -e ;\
+	CONTROLLER_GEN_TMP_DIR=$$(mktemp -d) ;\
+	cd $$CONTROLLER_GEN_TMP_DIR ;\
+	go mod init tmp ;\
+	GOOS=${OS} go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.18.0 ;\
+	rm -rf $$CONTROLLER_GEN_TMP_DIR ;\
+	}
+CONTROLLER_GEN=$(GOBIN)/controller-gen
+else
+CONTROLLER_GEN=$(shell which controller-gen)
+endif
+
+# Generate CRDs
+manifests: controller-gen
+	go mod vendor
+	# generate hyperjob crd with description
+	$(CONTROLLER_GEN) $(CRD_OPTIONS) paths="./vendor/volcano.sh/apis/pkg/apis/training/v1alpha1" output:crd:artifacts:config=docs/deploy
+	# generate hyperjob crd without description to avoid yaml size limit when using `kubectl apply`
+	$(CONTROLLER_GEN) $(CRD_OPTIONS_EXCLUDE_DESCRIPTION) paths="./vendor/volcano.sh/apis/pkg/apis/training/v1alpha1" output:crd:artifacts:config=docs/deploy
+	rm -rf vendor
