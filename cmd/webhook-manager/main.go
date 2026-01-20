@@ -30,6 +30,8 @@ import (
 	"volcano.sh/volcano/pkg/version"
 
 	_ "volcano.sh/volcano-global/pkg/webhooks/resourcebinding/mutating"
+	_ "volcano.sh/volcano/pkg/webhooks/admission/jobs/mutate"
+	_ "volcano.sh/volcano/pkg/webhooks/admission/jobs/validate"
 )
 
 func main() {

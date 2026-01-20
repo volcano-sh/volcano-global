@@ -3,6 +3,7 @@ module volcano.sh/volcano-global
 go 1.24.0
 
 require (
+	github.com/google/go-cmp v0.7.0
 	github.com/karmada-io/karmada v1.13.0-beta.0
 	github.com/spf13/pflag v1.0.6
 	github.com/stretchr/testify v1.10.0
@@ -14,9 +15,10 @@ require (
 	k8s.io/component-base v0.34.1
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kube-openapi v0.0.0-20250710124328-f3f2b991d03b
+	k8s.io/kubernetes v1.34.1
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397
 	sigs.k8s.io/controller-runtime v0.19.1
-	volcano.sh/apis v1.13.1-0.20251028070205-46d20c0699e7
+	volcano.sh/apis v1.13.2-0.20260116062331-f020f6945ed5
 	volcano.sh/volcano v1.14.0-alpha.0
 )
 
@@ -41,8 +43,9 @@ require (
 	github.com/google/cadvisor v0.52.1 // indirect
 	github.com/google/cel-go v0.26.0 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/hashicorp/errwrap v1.1.0 // indirect
+	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
@@ -64,6 +67,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.36.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/crypto v0.39.0 // indirect
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
 	golang.org/x/net v0.41.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
@@ -84,7 +88,7 @@ require (
 	k8s.io/controller-manager v0.34.1 // indirect
 	k8s.io/dynamic-resource-allocation v0.0.0 // indirect
 	k8s.io/kube-scheduler v0.0.0 // indirect
-	k8s.io/kubernetes v1.34.1 // indirect
+	k8s.io/kubelet v0.34.1 // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
@@ -125,6 +129,4 @@ replace (
 	k8s.io/mount-utils => k8s.io/mount-utils v0.34.1
 	k8s.io/pod-security-admission => k8s.io/pod-security-admission v0.34.1
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.34.1
-	volcano.sh/apis => volcano.sh/apis v1.13.1-0.20251028070205-46d20c0699e7
-	volcano.sh/volcano => github.com/volcano-sh/volcano v1.14.0-alpha.0
 )

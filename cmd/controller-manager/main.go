@@ -17,17 +17,18 @@ limitations under the License.
 package main
 
 import (
-    "fmt"
-    "os"
-    "runtime"
-    "sort"
-    "time"
+	"fmt"
+	"os"
+	"runtime"
+	"sort"
+	"time"
 
 	"github.com/spf13/pflag"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	cliflag "k8s.io/component-base/cli/flag"
 	componentbaseoptions "k8s.io/component-base/config/options"
 	"k8s.io/klog/v2"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"volcano.sh/volcano/cmd/controller-manager/app"
 	"volcano.sh/volcano/cmd/controller-manager/app/options"
 	"volcano.sh/volcano/pkg/controllers/framework"
@@ -35,10 +36,12 @@ import (
 	"volcano.sh/volcano/pkg/version"
 
 	dispatcheroptions "volcano.sh/volcano-global/pkg/dispatcher/options"
+	reconcileroptions "volcano.sh/volcano-global/pkg/reconciler/options"
 
 	_ "volcano.sh/volcano-global/pkg/controller/datadependency"
 	_ "volcano.sh/volcano-global/pkg/controller/datadependency/plugins/amoro"
 	_ "volcano.sh/volcano-global/pkg/dispatcher"
+	_ "volcano.sh/volcano-global/pkg/reconciler"
 	_ "volcano.sh/volcano/pkg/controllers/garbagecollector"
 )
 
@@ -47,6 +50,7 @@ const componentName = "volcano-global-controller-manager"
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	klog.InitFlags(nil)
+	ctrl.SetLogger(klog.Background())
 
 	fs := pflag.CommandLine
 	s := options.NewServerOption()
@@ -67,14 +71,16 @@ func main() {
 	commonutil.LeaderElectionDefault(&s.LeaderElection)
 	s.LeaderElection.ResourceName = componentName
 	componentbaseoptions.BindLeaderElectionFlags(&s.LeaderElection, fs)
-    // add dispatcher flag.
-    fs.AddFlagSet(dispatcheroptions.RegisterDispatcherFlags())
-    cliflag.InitFlags()
+	// add dispatcher flag.
+	fs.AddFlagSet(dispatcheroptions.RegisterDispatcherFlags())
+	// add reconciler flag.
+	fs.AddFlagSet(reconcileroptions.RegisterReconcilerFlags())
+	cliflag.InitFlags()
 
-    if s.PrintVersion {
-        version.PrintVersionAndExit()
-        return
-    }
+	if s.PrintVersion {
+		version.PrintVersionAndExit()
+		return
+	}
 	if err := s.CheckOptionOrDie(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
