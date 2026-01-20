@@ -1,19 +1,72 @@
-# Deploy `Volcano-global` Guide
+# Volcano-global Deployment Guide
 
-# The Structure of the whole multi-cluster
+## Multi-cluster Architecture Overview
 
 ![architecture_diagram.svg](../imgs/architecture_diagram.svg)
 
-`Volcano-global` is deployed on the basis of `Karmada`. After deploying
-`Karmada`, you need to deploy [`Volcano`](https://github.com/volcano-sh/volcano)
-on the worker cluster and deploy three components of `Volcano-global` in the `Karmada control plane`.
+`Volcano-global` is deployed on top of `Karmada`. After deploying
+`Karmada`, you need to:
+1. Deploy [`Volcano`](https://github.com/volcano-sh/volcano) on each worker cluster.
+2. Deploy the three components of `Volcano-global` in the `Karmada control plane`.
 
-This installation document will provide examples based on deploying `Karmada` using `./hack/local-up-karmada.sh`.
-You can modify the deployment method according to different environments.
+We provide two installation methods:
+- **Option A**: Install using Helm and scripts (recommended)
+- **Option B**: Manual step-by-step installation
 
-# Deploy Steps
+---
 
-## 1. Deploy the Karmada
+# Option A: Installation via Helm & Scripts
+
+This method uses two Helm charts:
+- **`volcano-global-apiserver`**: For the Karmada control plane
+- **`volcano-global-host`**: For the host plane
+
+### Prerequisites
+- Helm 3.x installed
+- Access to the Karmada control plane
+- Karmada and Volcano already deployed (same requirements as manual deployment)
+
+### Important Note
+The default Karmada configuration path is `/etc/karmada`. If your environment uses a different path, please update the path in both `installer/install.sh` and `installer/uninstall.sh` before execution.
+
+### Configuration Options
+
+#### Karmada Control Plane Chart (`volcano-global-apiserver`)
+Key configurations (see `installer/helm/charts/volcano-global-apiserver/values.yaml`):
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `crds.enabled` | Enable/disable installation of CRDs for Jobs and Queues | `true` |
+| `webhooks.enabled` | Enable the webhook service that intercepts ResourceBinding creation requests | `true` |
+| `resourceInterpreters` | Enable resource interpreter customizations for Queue and VCJob | `true` |
+
+#### Host Plane Chart (`volcano-global-host`)
+Key configurations (see `installer/helm/charts/volcano-global-host/values.yaml`):
+
+| Component | Parameter | Description | Default |
+|-----------|-----------|-------------|---------|
+| Controller Manager | `controllerManager.enabled` | Enable/disable the controller manager | `true` |
+| | `controllerManager.replicas` | Number of controller manager replicas | `1` |
+| | `controllerManager.dispatchPeriod` | Dispatcher scheduling period | `1s` |
+| Webhook Manager | `webhookManager.enabled` | Enable/disable the webhook manager | `true` |
+| | `webhookManager.replicas` | Number of webhook manager replicas | `1` |
+| | `webhookManager.port` | Webhook server port | `8443` |
+| Secret Management | `secretCopy.enabled` | Enable secret copying from karmada-system | `true` |
+
+### Installation & Uninstallation
+Execute the provided scripts:
+- **Install**: Run `installer/install.sh`
+- **Uninstall**: Run `installer/uninstall.sh`
+
+---
+
+## Option B: Manual Step-by-Step Installation
+
+The following steps provide examples based on deploying Karmada using `./hack/local-up-karmada.sh`. Note that different Karmada installation methods may generate configuration files in different paths. You can adapt these steps according to your specific environment.
+
+### Deploy Steps
+
+#### 1. Deploy the Karmada
 
 Suggest `Karmada` Version: **v1.13.0-beta.0 or higher**
 
@@ -29,7 +82,7 @@ cd karmada
 ./hack/local-up-karmada.sh
 ```
 
-## 2. Deploy the Volcano to member clusters
+#### 2. Deploy the Volcano to member clusters
 
 Suggest `Volcano` Version: **1.10.0 or higher**
 
@@ -47,7 +100,7 @@ kubectl --context member2 apply -f https://raw.githubusercontent.com/volcano-sh/
 kubectl --context member3 apply -f https://raw.githubusercontent.com/volcano-sh/volcano/release-1.10/installer/volcano-development.yaml
 ```
 
-## 3. Deploy the `Kubernetes Reflector` to share the Karmada's kubeconfig secret to volcano-global namespace
+#### 3. Deploy the `Kubernetes Reflector` to share the Karmada's kubeconfig secret to volcano-global namespace
 
 The `Karmada control plane` is a standalone apiserver,
 so we need the kubeconfig secret in the `karmada-system` to access it.
@@ -67,7 +120,7 @@ kubectl --context karmada-host annotate secret karmada-webhook-config \
   --namespace=karmada-system
 ```
 
-## 4. Deploy the volcano-global controller and webhook manager at Karmada control plane cluster
+#### 4. Deploy the volcano-global controller and webhook manager at Karmada control plane cluster
 
 ```bash
 # Switch to Karmada host kubeconfig.
@@ -85,7 +138,7 @@ kubectl --context karmada-host apply -f docs/deploy/volcano-global-webhook-manag
 kubectl --context karmada-apiserver apply -f docs/deploy/volcano-global-webhooks.yaml
 ```
 
-## 5. Apply the required CRD at Karmada control plane
+#### 5. Apply the required CRD at Karmada control plane
 
 In addition to using `Karmada` CRDs, `volcano-global` also requires
 the introduction of some `Volcano` CRDs to enable the **queue capability** for the `volcano-global dispatcher`.
@@ -104,7 +157,7 @@ kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volca
 kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volcano/raw/release-1.10/installer/helm/chart/volcano/crd/bases/scheduling.volcano.sh_queues.yaml
 ```
 
-## 6. Apply the custom volcano job and queue resource interpreters at Karmada control plane
+#### 6. Apply the custom volcano job and queue resource interpreters at Karmada control plane
 
 We need to add a `custom resource interpreter` for the `Volcano` job to synchronize
 the job status to the `Karmada control plane`.
@@ -118,7 +171,7 @@ kubectl --context karmada-apiserver apply -f docs/deploy/vcjob-resource-interpre
 kubectl --context karmada-apiserver apply -f docs/deploy/queue-resource-interpreter-customization.yaml
 ```
 
-## 7. Apply the All-Queue-PropagationPolicy at Karmada control plane
+#### 7. Apply the All-Queue-PropagationPolicy at Karmada control plane
 
 By default, we **distribute all `Queues` from the control plane to every `Worker Cluster`**
 to prevent tasks from being dispatched to a `Worker Cluster` without a corresponding `Queue`.
@@ -141,7 +194,7 @@ kubectl --context karmada-apiserver apply -f docs/deploy/volcano-global-all-queu
 kubectl --context karmada-apiserver label clusterpropagationpolicy volcano-global-all-queue-propagation resourcetemplate.karmada.io/deletion-protected=Always
 ```
 
-## 8. Try the example Job
+#### 8. Try the example Job
 
 ```bash
 # Switch to Karmada host kubeconfig.

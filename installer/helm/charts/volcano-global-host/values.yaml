@@ -1,0 +1,37 @@
+# Controller Manager configuration
+controllerManager:
+  enabled: true
+  image:
+    repository: volcanosh/volcano-global-controller-manager
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  dispatchPeriod: 1s
+  leaderElection: false
+  kubeconfigPath: /etc/kubeconfig/karmada.config
+
+# Webhook Manager configuration
+webhookManager:
+  enabled: true
+  image:
+    repository: volcanosh/volcano-global-webhook-manager
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 8443
+  kubeconfigPath: /etc/kubeconfig/karmada.config
+
+webhookInit:
+  image:
+    repository: volcanosh/volcano-global-webhook-manager
+    tag: latest
+    pullPolicy: IfNotPresent
+
+webhookDeInit:
+  image:
+    repository: docker.io/beli/kubectl-shell
+    tag: devel
+    pullPolicy: IfNotPresent
+
+secretCopy:  
+  enabled: true

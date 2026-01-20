@@ -1,0 +1,70 @@
+{{- if .Values.webhookManager.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: volcano-global-webhook-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: volcano-global-webhook-manager
+spec:
+  replicas: {{ .Values.webhookManager.replicas }}
+  selector:
+    matchLabels:
+      app: volcano-global-webhook-manager
+  template:
+    metadata:
+      labels:
+        app: volcano-global-webhook-manager
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: volcano-global-webhook-manager
+          image: "{{ .Values.webhookManager.image.repository }}:{{ .Values.webhookManager.image.tag }}"
+          imagePullPolicy: {{ .Values.webhookManager.image.pullPolicy }}
+          args:
+            - --enabled-admission=/resourcebindings/mutate
+            - --tls-cert-file=/admission.local.config/certificates/tls.crt
+            - --tls-private-key-file=/admission.local.config/certificates/tls.key
+            - --ca-cert-file=/admission.local.config/certificates/ca.crt
+            - --webhook-service-name=volcano-global-webhook
+            - --webhook-namespace={{ .Release.Namespace }}
+            - --logtostderr
+            - --enable-healthz=true
+            - --kubeconfig={{ .Values.webhookManager.kubeconfigPath }}
+            - --port={{ .Values.webhookManager.port }}
+            - -v=5
+            - 2>&1
+          {{- with .Values.webhookManager.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - mountPath: /admission.local.config/certificates
+              name: admission-certs
+              readOnly: true
+            - name: webhook-config
+              mountPath: /etc/kubeconfig
+              readOnly: true
+      volumes:
+        - name: webhook-config
+          secret:
+            secretName: karmada-webhook-config
+        - name: admission-certs
+          secret:
+            secretName: volcano-global-webhook-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: volcano-global-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: volcano-global-webhook-manager
+spec:
+  ports:
+    - port: 443
+      protocol: TCP
+      targetPort: {{ .Values.webhookManager.port }}
+  selector:
+    app: volcano-global-webhook-manager
+{{- end }}
