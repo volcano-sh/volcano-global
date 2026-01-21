@@ -155,23 +155,3 @@ func setupTestController(ctx context.Context, dsc *v1alpha1.DataSourceClaim) *Da
 
 	return controller
 }
-
-// startTestController starts the test controller and waits for cache sync
-// func startTestController(ctx context.Context, controller *DataDependencyController) {
-// 	go controller.Run(ctx.Done())
-
-// 	// Wait for cache sync
-// 	if !cache.WaitForCacheSync(ctx.Done(),
-// 		controller.dscListerSynced,
-// 		controller.dsListerSynced,
-// 		controller.rbListerSynced,
-// 		controller.cListerSynced,
-// 		controller.configMapListerSynced) {
-// 		klog.Fatal("Failed to wait for cache sync")
-// 	}
-
-// 	// Wait a bit for the controller to start processing
-// 	wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-// 		return controller.queue.Len() == 0, nil
-// 	})
-// }
