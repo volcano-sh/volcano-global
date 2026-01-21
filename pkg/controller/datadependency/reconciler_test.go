@@ -124,7 +124,7 @@ func TestReconcileFunction(t *testing.T) {
 		// setupTestController puts the DSC into the Fake Client
 		controller := setupTestController(ctx, dsc)
 
-		// [FIX 1] Start Informers manually (No background workers)
+		// Start Informers manually (No background workers)
 		controller.karmadaInformerFactory.Start(ctx.Done())
 		controller.dataInformerFactory.Start(ctx.Done())
 
@@ -133,7 +133,7 @@ func TestReconcileFunction(t *testing.T) {
 			controller.dscListerSynced,
 		)
 
-		// [FIX 2] Add DSC to Indexer manually
+		// Add DSC to Indexer manually
 		// Reconcile reads from the Lister (cache), so we must ensure the object exists there.
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
 
@@ -186,7 +186,7 @@ func TestReconcileFunction(t *testing.T) {
 		controller := setupTestController(ctx, dsc)
 		controller.pluginManager = mockPluginManager
 
-		// [FIX 1] Start Informers manually (No background workers)
+		// Start Informers manually (No background workers)
 		controller.karmadaInformerFactory.Start(ctx.Done())
 		controller.dataInformerFactory.Start(ctx.Done())
 
@@ -196,7 +196,7 @@ func TestReconcileFunction(t *testing.T) {
 			controller.dsListerSynced,
 		)
 
-		// [FIX 2] Add DSC to Indexer manually
+		// Add DSC to Indexer manually
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
 
 		// Get the object key
@@ -284,7 +284,7 @@ func TestReconcileFunction(t *testing.T) {
 		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
 
-		// [FIX 1] Start Informers manually (No background workers)
+		// Start Informers manually (No background workers)
 		controller.karmadaInformerFactory.Start(ctx.Done())
 		controller.dataInformerFactory.Start(ctx.Done())
 
@@ -295,14 +295,14 @@ func TestReconcileFunction(t *testing.T) {
 			controller.rbListerSynced,
 		)
 
-		// [FIX 2] Add DSC to Indexer manually
+		// Add DSC to Indexer manually
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
 
 		// 3. Create DS and Sync Indexer
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
 		assert.NoError(t, err, "Failed to create DataSource")
 
-		// [FIX 3] Add DS to Indexer manually
+		// Add DS to Indexer manually
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
 
 		// Get the object key
@@ -388,7 +388,7 @@ func TestReconcileFunction(t *testing.T) {
 		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
 
-		// [FIX 1] Start Informers manually
+		// Start Informers manually
 		controller.karmadaInformerFactory.Start(ctx.Done())
 		controller.dataInformerFactory.Start(ctx.Done())
 
@@ -400,14 +400,14 @@ func TestReconcileFunction(t *testing.T) {
 			controller.cListerSynced,
 		)
 
-		// [FIX 2] Add DSC to Indexer manually
+		// Add DSC to Indexer manually
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
 
 		// 3. Create Objects & Sync Indexers
 		// Create DS
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
 		assert.NoError(t, err)
-		// [FIX 3] Add DS to Indexer
+		// Add DS to Indexer
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
 
 		// Create Clusters
@@ -416,7 +416,7 @@ func TestReconcileFunction(t *testing.T) {
 			c := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: name}}
 			_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, c, metav1.CreateOptions{})
 			assert.NoError(t, err)
-			// [FIX 4] Add Cluster to Indexer (Critical for calculation)
+			// Add Cluster to Indexer (Critical for calculation)
 			controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(c)
 		}
 
@@ -438,7 +438,7 @@ func TestReconcileFunction(t *testing.T) {
 
 		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
 		assert.NoError(t, err)
-		// [FIX 5] Add RB to Indexer (Critical for findAssociatedRB)
+		// Add RB to Indexer (Critical for findAssociatedRB)
 		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
 
 		// Get the object key
@@ -1081,7 +1081,7 @@ func TestReconcileFunction(t *testing.T) {
 		// setupTestController creates the DSC in the fake client
 		controller := setupTestController(ctx, dsc)
 
-		// [FIX 1] Start Informers manually (No background workers)
+		// Start Informers manually (No background workers)
 		controller.karmadaInformerFactory.Start(ctx.Done())
 		controller.dataInformerFactory.Start(ctx.Done())
 
@@ -1091,14 +1091,14 @@ func TestReconcileFunction(t *testing.T) {
 			controller.dsListerSynced,
 		)
 
-		// [FIX 2] Add DSC to Indexer manually
+		// Add DSC to Indexer manually
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
 
 		// 3. Create DS and Sync Indexer
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
 		assert.NoError(t, err, "Failed to create DataSource")
 
-		// [FIX 3] Add DS to Indexer manually
+		// Add DS to Indexer manually
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
 
 		// Get the object key
@@ -1270,7 +1270,7 @@ func TestReconcileFunction(t *testing.T) {
 		_, err = controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Update(ctx, updatedDS, metav1.UpdateOptions{})
 		assert.NoError(t, err, "Failed to update DataSource")
 
-		// CRITICAL FIX: Manually update the DS in the Informer Indexer.
+		// Manually update the DS in the Informer Indexer.
 		// Since we are not running the full async loop, the Lister used inside Reconcile
 		// will still see 'originalDS' unless we update the cache explicitly.
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Update(updatedDS)
@@ -1369,7 +1369,7 @@ func TestReconcileFunction(t *testing.T) {
 		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
 
-		// [FIX 1] Start Informers manually
+		// Start Informers manually
 		controller.karmadaInformerFactory.Start(ctx.Done())
 		controller.dataInformerFactory.Start(ctx.Done()) // Check your variable name (dataInformerFactory vs datadependencyInformerFactory)
 
@@ -1378,13 +1378,13 @@ func TestReconcileFunction(t *testing.T) {
 			controller.dsListerSynced,
 		)
 
-		// [FIX 2] Add DSC to Indexer
+		// Add DSC to Indexer
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
 
 		// 3. Create DS and Sync Indexer
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, originalDS, metav1.CreateOptions{})
 		assert.NoError(t, err, "Failed to create DataSource")
-		// [FIX 3] Add DS to Indexer manually
+		// Add DS to Indexer
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(originalDS)
 
 		// 4. Simulate DS deletion
@@ -1395,7 +1395,7 @@ func TestReconcileFunction(t *testing.T) {
 		_, err = controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Update(ctx, dsToDelete, metav1.UpdateOptions{})
 		assert.NoError(t, err, "Failed to update DataSource with DeletionTimestamp")
 
-		// [FIX 4 - CRITICAL] Manually update the Indexer with the deleted DS
+		// Manually update the Indexer with the deleted DS
 		// Reconcile -> handleBound -> finds DS from Cache.
 		// If Cache isn't updated, it won't see DeletionTimestamp and won't trigger unbinding.
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Update(dsToDelete)
@@ -1751,7 +1751,7 @@ func TestHandlePending(t *testing.T) {
 		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
 
-		// [FIX 1] Start Informers manually, DO NOT start background workers
+		// Start Informers manually, DO NOT start background workers
 		controller.karmadaInformerFactory.Start(ctx.Done())
 		controller.dataInformerFactory.Start(ctx.Done())
 
@@ -1766,10 +1766,10 @@ func TestHandlePending(t *testing.T) {
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
 		assert.NoError(t, err, "Failed to create DataSource in fake client")
 
-		// [FIX 2] Manually add DS to Indexer so findMatchedDS can see it immediately
+		// Manually add DS to Indexer so findMatchedDS can see it immediately
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
 
-		// [FIX 3] Manually add DSC to Indexer (good practice)
+		// Manually add DSC to Indexer (good practice)
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
 
 		// 4. Run Logic (handlePending)
@@ -1844,7 +1844,7 @@ func TestHandlePending(t *testing.T) {
 		controller := setupTestController(ctx, dsc)
 		controller.pluginManager = mockPluginManager
 
-		// [FIX 1] Start Informers manually
+		// Start Informers manually
 		controller.karmadaInformerFactory.Start(ctx.Done())
 		controller.dataInformerFactory.Start(ctx.Done())
 
@@ -1859,11 +1859,11 @@ func TestHandlePending(t *testing.T) {
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
 		assert.NoError(t, err, "Failed to create DataSource in fake client")
 
-		// [FIX 2] Add non-matching DS to Indexer
+		// Manually add non-matching DS to Indexer
 		// This ensures findMatchedDS sees it but correctly ignores it due to mismatch
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
 
-		// [FIX 3] Add DSC to Indexer
+		// Manually add DSC to Indexer
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
 
 		// 4. Run Logic (handlePending)
@@ -3280,7 +3280,7 @@ func TestFindAssociatedRB(t *testing.T) {
 		_, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("test-namespace").Create(ctx, rb, metav1.CreateOptions{})
 		assert.NoError(t, err, "Should create ResourceBinding successfully")
 
-		// [FIX] Manually add RB to Indexer (No wait.Poll needed)
+		// Manually add RB to Indexer (No wait.Poll needed)
 		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
 
 		// Call findAssociatedRB
@@ -3331,7 +3331,7 @@ func TestFindAssociatedRB(t *testing.T) {
 		_, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("different-namespace").Create(ctx, rb, metav1.CreateOptions{})
 		assert.NoError(t, err, "Should create ResourceBinding successfully")
 
-		// [FIX] Manually add to Indexer
+		// Manually add RB to Indexer
 		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
 
 		// Call findAssociatedRB - should not find RB in different namespace
@@ -3399,7 +3399,7 @@ func TestFindAssociatedRB(t *testing.T) {
 		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("test-namespace").Create(ctx, rb2, metav1.CreateOptions{})
 		assert.NoError(t, err, "Should create ResourceBinding 2 successfully")
 
-		// [FIX] Manually add both RBs to Indexer
+		// Manually add both RBs to Indexer
 		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb1)
 		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb2)
 
@@ -3506,7 +3506,7 @@ func TestInjectPlacementAffinity(t *testing.T) {
 		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster3, metav1.CreateOptions{})
 		assert.NoError(t, err)
 
-		// [FIX] Manually add clusters to Indexer (Critical for injectPlacementAffinity)
+		// Manually add clusters to Indexer (Critical for injectPlacementAffinity)
 		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster1)
 		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster2)
 		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster3)
@@ -3584,7 +3584,7 @@ func TestInjectPlacementAffinity(t *testing.T) {
 		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster4, metav1.CreateOptions{})
 		assert.NoError(t, err)
 
-		// [FIX] Manually add clusters to Indexer
+		// Manually add clusters to Indexer
 		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster1)
 		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster2)
 		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster3)
@@ -3708,7 +3708,7 @@ func TestInjectPlacementAffinity(t *testing.T) {
 		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster2, metav1.CreateOptions{})
 		assert.NoError(t, err)
 
-		// [FIX] Manually add clusters to Indexer
+		// Manually add clusters to Indexer
 		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster1)
 		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster2)
 
@@ -4301,7 +4301,7 @@ func TestHandlePlacementUpdate(t *testing.T) {
 		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
 
-		// [FIX 1] Start Informers manually
+		// Manually start Informers
 		controller.karmadaInformerFactory.Start(ctx.Done())
 		controller.dataInformerFactory.Start(ctx.Done())
 
@@ -4321,19 +4321,19 @@ func TestHandlePlacementUpdate(t *testing.T) {
 		for _, cluster := range clusters {
 			_, err := controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster, metav1.CreateOptions{})
 			assert.NoError(t, err)
-			// [FIX 2] Add to Indexer (Critical for triggerRescheduling calculation)
+			// Manually add clusters to Indexer (Critical for triggerRescheduling calculation)
 			controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster)
 		}
 
 		// 4. Create DS/RB and Sync Indexer
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
 		assert.NoError(t, err)
-		// [FIX 3] Add to Indexer
+		// Manually add DS to Indexer
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
 
 		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
 		assert.NoError(t, err)
-		// [FIX 4] Add to Indexer (Critical for findAssociatedRB)
+		// Manually add RB to Indexer (Critical for findAssociatedRB)
 		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
 
 		// 5. Execute Logic
@@ -4595,7 +4595,7 @@ func TestHandleUnbinding(t *testing.T) {
 		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
 
-		// [FIX 1] Start Informers manually (No background workers)
+		// Manually start Informers (No background workers)
 		controller.karmadaInformerFactory.Start(ctx.Done())
 		controller.dataInformerFactory.Start(ctx.Done())
 
@@ -4607,19 +4607,19 @@ func TestHandleUnbinding(t *testing.T) {
 		// 3. Create Objects AND Sync Indexers
 		// Create DS
 		controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
-		// [FIX 2] Add DS to Indexer
+		// Manually add DS to Indexer
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
 
 		// Create RB
 		controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
-		// [FIX 3] Add RB to Indexer (CRITICAL: findAssociatedRB relies on this)
+		// Manually add RB to Indexer (CRITICAL: findAssociatedRB relies on this)
 		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
 
 		// Create Clusters
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster1, metav1.CreateOptions{})
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster2, metav1.CreateOptions{})
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster3, metav1.CreateOptions{})
-		// [FIX 4] Add Clusters to Indexer
+		// Manually add Clusters to Indexer
 		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster1)
 		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster2)
 		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster3)
