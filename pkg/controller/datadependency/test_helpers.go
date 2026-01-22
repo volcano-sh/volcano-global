@@ -9,7 +9,6 @@ import (
 	karmadaclientset "github.com/karmada-io/karmada/pkg/generated/clientset/versioned/fake"
 	karmadainformers "github.com/karmada-io/karmada/pkg/generated/informers/externalversions"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic/fake"
 	kubeinformers "k8s.io/client-go/informers"
 	kubefake "k8s.io/client-go/kubernetes/fake"
@@ -17,9 +16,9 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
-    "volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
-    dscfake "volcano.sh/apis/pkg/client/clientset/versioned/fake"
-    datadependencyinformers "volcano.sh/apis/pkg/client/informers/externalversions"
+	"volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
+	dscfake "volcano.sh/apis/pkg/client/clientset/versioned/fake"
+	datadependencyinformers "volcano.sh/apis/pkg/client/informers/externalversions"
 )
 
 // MockPluginManager is a mock implementation of PluginManagerInterface for testing
@@ -155,24 +154,4 @@ func setupTestController(ctx context.Context, dsc *v1alpha1.DataSourceClaim) *Da
 	kubeInformerFactory.Start(ctx.Done())
 
 	return controller
-}
-
-// startTestController starts the test controller and waits for cache sync
-func startTestController(ctx context.Context, controller *DataDependencyController) {
-	go controller.Run(ctx.Done())
-
-	// Wait for cache sync
-	if !cache.WaitForCacheSync(ctx.Done(),
-		controller.dscListerSynced,
-		controller.dsListerSynced,
-		controller.rbListerSynced,
-		controller.cListerSynced,
-		controller.configMapListerSynced) {
-		klog.Fatal("Failed to wait for cache sync")
-	}
-
-	// Wait a bit for the controller to start processing
-	wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-		return controller.queue.Len() == 0, nil
-	})
 }

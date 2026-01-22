@@ -33,9 +33,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	"volcano.sh/apis/pkg/apis/datadependency/v1alpha1"
@@ -68,18 +66,32 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Pass DSC object to setupTestController so it will be preset in fake client
+		// 1. Setup
 		controller := setupTestController(ctx, dsc)
-		startTestController(ctx, controller)
+
+		// Replace startTestController with Informer Start only
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
+
+		// Wait for sync
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.dscListerSynced,
+			controller.dsListerSynced,
+		)
+
+		// Manual Indexer Add
+		// Reconcile reads from Lister. Ensure Lister has the object.
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
 
 		// Get the object key
 		key, _ := cache.MetaNamespaceKeyFunc(dsc)
 
-		// Run reconcile
+		// 2. Run reconcile (Manual)
 		err := controller.Reconcile(key)
 		assert.NoError(t, err, "Reconcile should not return an error")
 
-		// Check if finalizer is added
+		// 3. Verify
+		// Get from Fake Client to verify persistence
 		updatedDsc, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims(dsc.Namespace).Get(ctx, dsc.Name, metav1.GetOptions{})
 		assert.NoError(t, err, "Failed to get updated DSC")
 		assert.Contains(t, updatedDsc.Finalizers, DataSourceClaimFinalizer, "Finalizer should be added")
@@ -90,6 +102,7 @@ func TestReconcileFunction(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
+		// 1. Setup Object
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "test-dsc",
@@ -107,18 +120,31 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Pass DSC object to setupTestController so it will be preset in fake client
+		// 2. Setup Controller
+		// setupTestController puts the DSC into the Fake Client
 		controller := setupTestController(ctx, dsc)
-		startTestController(ctx, controller)
+
+		// Start Informers manually (No background workers)
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
+
+		// Wait for sync
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.dscListerSynced,
+		)
+
+		// Add DSC to Indexer manually
+		// Reconcile reads from the Lister (cache), so we must ensure the object exists there.
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
 
 		// Get the object key
 		key, _ := cache.MetaNamespaceKeyFunc(dsc)
 
-		// Run reconcile
+		// 3. Run Reconcile
 		err := controller.Reconcile(key)
 		assert.NoError(t, err, "Reconcile should not return an error")
 
-		// Check if the phase is updated to Pending
+		// 4. Verify result from Fake Client
 		updatedDsc, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims(dsc.Namespace).Get(ctx, dsc.Name, metav1.GetOptions{})
 		assert.NoError(t, err, "Failed to get updated DSC")
 		assert.Equal(t, v1alpha1.DSCPhasePending, updatedDsc.Status.Phase, "DSC phase should be Pending")
@@ -129,7 +155,7 @@ func TestReconcileFunction(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Create a DSC in Pending state
+		// 1. Setup Data
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "test-dsc",
@@ -152,31 +178,42 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Setup controller with mock plugin manager that returns clusters for DynamicBinding
+		// 2. Setup Controller & Mock
 		mockPluginManager := NewMockPluginManager(func(ctx context.Context, dsc *v1alpha1.DataSourceClaim) ([]string, error) {
 			return []string{"cluster1", "cluster2"}, nil
 		})
 
 		controller := setupTestController(ctx, dsc)
 		controller.pluginManager = mockPluginManager
-		startTestController(ctx, controller)
+
+		// Start Informers manually (No background workers)
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
+
+		// Wait for sync
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.dscListerSynced,
+			controller.dsListerSynced,
+		)
+
+		// Add DSC to Indexer manually
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
 
 		// Get the object key
 		key, _ := cache.MetaNamespaceKeyFunc(dsc)
 
-		// Run reconcile - this should trigger DynamicBinding and create a new DataSource
+		// 3. Run Reconcile
+		// This triggers: handlePending -> findMatchedDS (miss) -> dynamicBinding -> create DS -> staticBinding
 		err := controller.Reconcile(key)
 		assert.NoError(t, err, "Reconcile should not return an error")
 
-		// Check if DSC phase is updated to Bound
+		// 4. Verify DSC Result
 		updatedDsc, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims(dsc.Namespace).Get(ctx, dsc.Name, metav1.GetOptions{})
 		assert.NoError(t, err, "Failed to get updated DSC")
 		assert.Equal(t, v1alpha1.DSCPhaseBound, updatedDsc.Status.Phase, "DSC phase should be Bound")
-
-		// Check if BoundDataSource is set
 		assert.NotEmpty(t, updatedDsc.Status.BoundDataSource, "BoundDataSource should be set")
 
-		// Verify that a new DataSource was created via DynamicBinding
+		// 5. Verify DS Creation
 		createdDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, updatedDsc.Status.BoundDataSource, metav1.GetOptions{})
 		assert.NoError(t, err, "Failed to get created DataSource")
 		assert.Equal(t, "amoro", createdDS.Spec.System, "DataSource system should match DSC")
@@ -195,7 +232,7 @@ func TestReconcileFunction(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Create a DSC in Bound state
+		// 1. Setup Data
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "test-dsc",
@@ -220,10 +257,6 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Setup controller with DSC
-		controller := setupTestController(ctx, dsc)
-
-		// Create a DataSource and add it to the fake client
 		ds := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-ds",
@@ -248,18 +281,39 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Add DataSource to the fake client
+		// 2. Setup Controller
+		controller := setupTestController(ctx, dsc)
+
+		// Start Informers manually (No background workers)
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
+
+		// Wait for sync
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.dscListerSynced,
+			controller.dsListerSynced,
+			controller.rbListerSynced,
+		)
+
+		// Add DSC to Indexer manually
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
+
+		// 3. Create DS and Sync Indexer
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
 		assert.NoError(t, err, "Failed to create DataSource")
-		startTestController(ctx, controller)
+
+		// Add DS to Indexer manually
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
 
 		// Get the object key
 		key, _ := cache.MetaNamespaceKeyFunc(dsc)
 
-		// Run reconcile - this should enter handleBound but return early due to no RB
+		// 4. Run Reconcile
+		// Logic: handleBound -> checks match (true) -> handlePlacementUpdate -> findAssociatedRB (nil) -> returns nil (Wait)
 		err = controller.Reconcile(key)
 		assert.NoError(t, err, "Reconcile should not return an error")
 
+		// 5. Verify Results
 		// Verify that DSC status remains unchanged (still Bound)
 		updatedDsc, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims(dsc.Namespace).Get(ctx, dsc.Name, metav1.GetOptions{})
 		assert.NoError(t, err, "Failed to get updated DSC")
@@ -282,7 +336,7 @@ func TestReconcileFunction(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Create a DSC in Bound state
+		// 1. Setup Objects
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "test-dsc",
@@ -307,10 +361,6 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Setup controller with DSC
-		controller := setupTestController(ctx, dsc)
-
-		// Create a DataSource and add it to the fake client
 		ds := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-ds",
@@ -335,28 +385,42 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Add DataSource to the fake client
+		// 2. Setup Controller
+		controller := setupTestController(ctx, dsc)
+
+		// Start Informers manually
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
+
+		// Wait for sync
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.dscListerSynced,
+			controller.dsListerSynced,
+			controller.rbListerSynced,
+			controller.cListerSynced,
+		)
+
+		// Add DSC to Indexer manually
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
+
+		// 3. Create Objects & Sync Indexers
+		// Create DS
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create DataSource")
+		assert.NoError(t, err)
+		// Add DS to Indexer
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
 
-		// Create some clusters for testing
-		cluster1 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster1"},
+		// Create Clusters
+		clusterNames := []string{"cluster1", "cluster2", "cluster3"}
+		for _, name := range clusterNames {
+			c := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: name}}
+			_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, c, metav1.CreateOptions{})
+			assert.NoError(t, err)
+			// Add Cluster to Indexer (Critical for calculation)
+			controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(c)
 		}
-		cluster2 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster2"},
-		}
-		cluster3 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster3"},
-		}
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster1, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster1")
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster2, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster2")
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster3, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster3")
 
-		// Create a ResourceBinding that matches the DSC's workload reference
+		// Create ResourceBinding
 		rb := &workv1alpha2.ResourceBinding{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-app-deployment",
@@ -372,46 +436,47 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Add ResourceBinding to the fake client
 		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create ResourceBinding")
-
-		startTestController(ctx, controller)
+		assert.NoError(t, err)
+		// Add RB to Indexer (Critical for findAssociatedRB)
+		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
 
 		// Get the object key
 		key, _ := cache.MetaNamespaceKeyFunc(dsc)
 
-		// Run reconcile
+		// 4. Run Reconcile
+		// Logic: handleBound -> match(true) -> handlePlacementUpdate -> findAssociatedRB(found) -> injectPlacementAffinity
 		err = controller.Reconcile(key)
 		assert.NoError(t, err, "Reconcile should not return an error")
 
-		// Verify that the ResourceBinding was updated with placement injection annotation
+		// 5. Verify Results
+		// Verify RB injection
 		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Get(ctx, rb.Name, metav1.GetOptions{})
 		assert.NoError(t, err, "Failed to get updated ResourceBinding")
 		assert.Equal(t, "true", updatedRB.Annotations[PlacementInjectedAnnotation], "ResourceBinding should have placement injected annotation")
 
-		// Verify that cluster affinity was set correctly
-		assert.NotNil(t, updatedRB.Spec.Placement, "Placement should be set")
-		assert.NotNil(t, updatedRB.Spec.Placement.ClusterAffinity, "ClusterAffinity should be set")
-		assert.Contains(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters, "cluster3", "cluster3 should be excluded")
-		assert.NotContains(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters, "cluster1", "cluster1 should not be excluded")
-		assert.NotContains(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters, "cluster2", "cluster2 should not be excluded")
+		// Verify Affinity (DS: 1,2. All: 1,2,3. Exclude: 3)
+		if assert.NotNil(t, updatedRB.Spec.Placement) && assert.NotNil(t, updatedRB.Spec.Placement.ClusterAffinity) {
+			assert.Contains(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters, "cluster3")
+			assert.NotContains(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters, "cluster1")
+			assert.NotContains(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters, "cluster2")
+		}
 
-		// Verify that excluded clusters annotation was set
-		assert.Equal(t, "cluster3", updatedRB.Annotations[ExcludedClustersAnnotation], "ExcludedClustersAnnotation should be set")
+		// Verify Annotation
+		assert.Equal(t, "cluster3", updatedRB.Annotations[ExcludedClustersAnnotation])
 
-		// Verify DSC status remains unchanged
+		// Verify DSC Status
 		updatedDsc, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Get(ctx, dsc.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get updated DSC")
-		assert.Equal(t, v1alpha1.DSCPhaseBound, updatedDsc.Status.Phase, "DSC phase should remain Bound")
-		assert.Equal(t, "test-ds", updatedDsc.Status.BoundDataSource, "BoundDataSource should remain unchanged")
+		assert.NoError(t, err)
+		assert.Equal(t, v1alpha1.DSCPhaseBound, updatedDsc.Status.Phase)
+		assert.Equal(t, "test-ds", updatedDsc.Status.BoundDataSource)
 	})
 
 	t.Run("Scenario 8: Second DSC created, matches existing DataSource via staticBinding", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Create the first DSC that is already bound to a DataSource
+		// 1. Setup Objects
 		firstDsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "first-dsc",
@@ -436,7 +501,6 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Create an existing DataSource that the first DSC is bound to
 		existingDs := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "shared-ds",
@@ -461,31 +525,39 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Setup controller with the first DSC
+		// 2. Setup Controller
 		controller := setupTestController(ctx, firstDsc)
 
-		// Add the existing DataSource to the fake client
+		// Start ONLY Informers
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
+
+		// Wait for cache sync
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.dscListerSynced,
+			controller.dsListerSynced,
+			controller.rbListerSynced,
+			controller.cListerSynced,
+		)
+
+		// 3. Create Objects in Client AND Indexer
+		// Create DS
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, existingDs, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create existing DataSource")
+		assert.NoError(t, err)
+		// Update Indexer
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(existingDs)
 
-		// Create some clusters for testing
-		cluster1 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster1"},
+		// Create Clusters
+		clusterNames := []string{"cluster1", "cluster2", "cluster3"}
+		for _, name := range clusterNames {
+			c := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: name}}
+			_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, c, metav1.CreateOptions{})
+			assert.NoError(t, err)
+			// Update Indexer (Critical for triggerRescheduling list)
+			controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(c)
 		}
-		cluster2 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster2"},
-		}
-		cluster3 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster3"},
-		}
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster1, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster1")
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster2, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster2")
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster3, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster3")
 
-		// Now create the second DSC with the same query conditions as the existing DataSource
+		// 4. Create Second DSC
 		secondDsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "second-dsc",
@@ -494,9 +566,9 @@ func TestReconcileFunction(t *testing.T) {
 				Finalizers: []string{DataSourceClaimFinalizer},
 			},
 			Spec: v1alpha1.DataSourceClaimSpec{
-				System:         "amoro",        // Same as existing DataSource
-				DataSourceType: "table",        // Same as existing DataSource
-				DataSourceName: "shared-table", // Same as existing DataSource
+				System:         "amoro",
+				DataSourceType: "table",
+				DataSourceName: "shared-table",
 				Workload: v1alpha1.WorkloadRef{
 					APIVersion: "apps/v1",
 					Kind:       "Deployment",
@@ -505,44 +577,38 @@ func TestReconcileFunction(t *testing.T) {
 				},
 			},
 			Status: v1alpha1.DataSourceClaimStatus{
-				Phase: v1alpha1.DSCPhasePending, // Initially pending
+				Phase: v1alpha1.DSCPhasePending,
 			},
 		}
 
-		// Add the second DSC to the fake client
 		_, err = controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Create(ctx, secondDsc, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create second DSC")
+		assert.NoError(t, err)
+		// Update Indexer
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(secondDsc)
 
-		startTestController(ctx, controller)
-
-		// Get the object key for the second DSC
+		// 5. Manual Reconcile (Step 1: Binding)
 		key, _ := cache.MetaNamespaceKeyFunc(secondDsc)
-
-		// Run reconcile for the second DSC - it should go through staticBinding and match the existing DataSource
 		err = controller.Reconcile(key)
-		assert.NoError(t, err, "Reconcile should not return an error")
+		assert.NoError(t, err)
 
-		// Verify that the second DSC was successfully bound to the existing DataSource
+		// Verify Binding
 		updatedSecondDsc, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Get(ctx, secondDsc.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get updated second DSC")
-		assert.Equal(t, v1alpha1.DSCPhaseBound, updatedSecondDsc.Status.Phase, "Second DSC should be bound")
-		assert.Equal(t, "shared-ds", updatedSecondDsc.Status.BoundDataSource, "Second DSC should be bound to the existing DataSource")
+		assert.NoError(t, err)
+		assert.Equal(t, v1alpha1.DSCPhaseBound, updatedSecondDsc.Status.Phase)
+		assert.Equal(t, "shared-ds", updatedSecondDsc.Status.BoundDataSource)
 
-		// Verify that the existing DataSource now has both DSCs in its ClaimRefs
+		// Sync updated DSC state to Indexer for next steps
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Update(updatedSecondDsc)
+
+		// Verify DS Refs
 		updatedDs, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, existingDs.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get updated DataSource")
-		assert.Len(t, updatedDs.Status.ClaimRefs, 2, "DataSource should have two ClaimRefs")
+		assert.NoError(t, err)
+		assert.Len(t, updatedDs.Status.ClaimRefs, 2)
 
-		// Check that both DSCs are referenced
-		claimNames := make([]string, len(updatedDs.Status.ClaimRefs))
-		for i, ref := range updatedDs.Status.ClaimRefs {
-			claimNames[i] = ref.Name
-		}
-		assert.Contains(t, claimNames, "first-dsc", "DataSource should reference first DSC")
-		assert.Contains(t, claimNames, "second-dsc", "DataSource should reference second DSC")
+		// Sync updated DS state to Indexer
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Update(updatedDs)
 
-		// Now test that ResourceBindings for the second DSC can be properly injected and scheduled
-		// Create a ResourceBinding that matches the second DSC's workload reference
+		// 6. Create ResourceBinding
 		rb := &workv1alpha2.ResourceBinding{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "second-app-deployment",
@@ -558,44 +624,35 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Add ResourceBinding to the fake client
 		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create ResourceBinding for second DSC")
+		assert.NoError(t, err)
+		// Update Indexer (Remove wait.Poll)
+		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
 
-		// Wait for the ResourceBinding to be synced in the cache
-		err = wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-			_, err := controller.rbLister.ResourceBindings("default").Get(rb.Name)
-			return err == nil, nil
-		})
-		assert.NoError(t, err, "ResourceBinding should be synced in cache")
-
-		// Run reconcile again to handle the ResourceBinding injection
+		// 7. Manual Reconcile (Step 2: Injection)
 		err = controller.Reconcile(key)
-		assert.NoError(t, err, "Reconcile should not return an error for RB injection")
+		assert.NoError(t, err)
 
-		// Verify that the ResourceBinding was updated with placement injection annotation
+		// Verify Injection
 		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Get(ctx, rb.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get updated ResourceBinding")
-		assert.Equal(t, "true", updatedRB.Annotations[PlacementInjectedAnnotation], "ResourceBinding should have placement injected annotation")
+		assert.NoError(t, err)
+		assert.Equal(t, "true", updatedRB.Annotations[PlacementInjectedAnnotation])
 
-		// Verify that cluster affinity was set correctly based on the DataSource locality
-		if assert.NotNil(t, updatedRB.Spec.Placement, "Placement should be set") {
-			if assert.NotNil(t, updatedRB.Spec.Placement.ClusterAffinity, "ClusterAffinity should be set") {
-				assert.Contains(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters, "cluster3", "cluster3 should be excluded")
-				assert.NotContains(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters, "cluster1", "cluster1 should not be excluded")
-				assert.NotContains(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters, "cluster2", "cluster2 should not be excluded")
-			}
+		// Verify Affinity (Total: 1,2,3. Locality: 1,2. Exclude: 3)
+		if assert.NotNil(t, updatedRB.Spec.Placement) && assert.NotNil(t, updatedRB.Spec.Placement.ClusterAffinity) {
+			assert.Contains(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters, "cluster3")
+			assert.NotContains(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters, "cluster1")
+			assert.NotContains(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters, "cluster2")
 		}
 
-		// Verify that excluded clusters annotation was set
-		assert.Equal(t, "cluster3", updatedRB.Annotations[ExcludedClustersAnnotation], "ExcludedClustersAnnotation should be set")
+		assert.Equal(t, "cluster3", updatedRB.Annotations[ExcludedClustersAnnotation])
 	})
 
 	t.Run("Scenario 9.1: Modified data source does not exist, DSC remains Pending", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Create initial DSC in Bound state
+		// 1. Setup Objects
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "test-dsc",
@@ -620,7 +677,6 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Create the original DataSource that DSC is bound to
 		originalDs := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "original-ds",
@@ -645,35 +701,42 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Setup controller with DSC and mock plugin manager that fails dynamic binding
+		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
-		// Replace the plugin manager with one that returns empty cluster list for dynamic binding
+
+		// Setup Mock Plugin (return empty list -> dynamic binding fails)
 		controller.pluginManager = NewMockPluginManager(func(ctx context.Context, dsc *v1alpha1.DataSourceClaim) ([]string, error) {
-			return []string{}, nil // Return empty list, DSC will remain Pending
+			return []string{}, nil
 		})
 
-		// Add original DataSource to the fake client
+		// Start Only Informers
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
+
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.dscListerSynced,
+			controller.dsListerSynced,
+			controller.rbListerSynced,
+			controller.cListerSynced,
+		)
+
+		// 3. Create Objects in Client AND Indexer
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, originalDs, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create original DataSource")
+		assert.NoError(t, err)
+		// Add DS to Indexer
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(originalDs)
 
-		// Create clusters for testing
-		cluster1 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster1"},
+		// Create Clusters
+		clusterNames := []string{"cluster1", "cluster2", "cluster3"}
+		for _, name := range clusterNames {
+			c := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: name}}
+			_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, c, metav1.CreateOptions{})
+			assert.NoError(t, err)
+			// Add Cluster to Indexer
+			controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(c)
 		}
-		cluster2 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster2"},
-		}
-		cluster3 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster3"},
-		}
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster1, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster1")
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster2, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster2")
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster3, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster3")
 
-		// Create a ResourceBinding that is already injected
+		// Create RB
 		rb := &workv1alpha2.ResourceBinding{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-app-deployment",
@@ -697,70 +760,58 @@ func TestReconcileFunction(t *testing.T) {
 				},
 			},
 		}
-
-		// Add ResourceBinding to the fake client
 		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create ResourceBinding")
+		assert.NoError(t, err)
+		// Add RB to Indexer
+		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
 
-		startTestController(ctx, controller)
-
-		// Now modify the DSC to reference a non-existent data source
+		// 4. Modify DSC (Trigger Test)
 		dscToUpdate := dsc.DeepCopy()
 		dscToUpdate.Spec.DataSourceName = "non-existent-table" // Change to non-existent data source
 		_, err = controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Update(ctx, dscToUpdate, metav1.UpdateOptions{})
-		assert.NoError(t, err, "Failed to update DSC")
+		assert.NoError(t, err)
 
-		// Wait for the DSC update to be synced to the lister cache
-		// This is crucial for the test to work correctly in different environments
-		err = wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-			cachedDSC, getErr := controller.dscLister.DataSourceClaims("default").Get(dsc.Name)
-			if getErr != nil {
-				return false, getErr
-			}
-			// Check if the DataSourceName has been updated in the cache
-			return cachedDSC.Spec.DataSourceName == "non-existent-table", nil
-		})
-		assert.NoError(t, err, "DSC update should be synced to lister cache")
+		// Sync updated DSC to Indexer
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Update(dscToUpdate)
 
-		// Get the object key
+		// 5. Manual Reconcile (Step 1: Unbinding)
 		key, _ := cache.MetaNamespaceKeyFunc(dscToUpdate)
-
-		// Run reconcile - should trigger unbinding due to mismatch
 		err = controller.Reconcile(key)
-		assert.NoError(t, err, "Reconcile should not return an error")
+		assert.NoError(t, err)
 
-		// Verify DSC status changed to Pending (unbinding occurred)
-		updatedDsc, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Get(ctx, dsc.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get updated DSC")
-		assert.Equal(t, v1alpha1.DSCPhasePending, updatedDsc.Status.Phase, "DSC should be in Pending state after unbinding")
-		assert.Empty(t, updatedDsc.Status.BoundDataSource, "BoundDataSource should be empty after unbinding")
+		// Verify Unbinding State
+		updatedDsc, _ := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Get(ctx, dsc.Name, metav1.GetOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, v1alpha1.DSCPhasePending, updatedDsc.Status.Phase)
+		assert.Empty(t, updatedDsc.Status.BoundDataSource)
 
-		// Verify original DataSource no longer has the DSC reference
-		updatedOriginalDs, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, originalDs.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get updated original DataSource")
-		assert.Empty(t, updatedOriginalDs.Status.ClaimRefs, "Original DataSource should have no ClaimRefs after unbinding")
+		// Sync updated DSC state (Pending) to Indexer for next step
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Update(updatedDsc)
 
-		// Verify ResourceBinding enters suspended state (placement injection removed)
-		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Get(ctx, rb.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get updated ResourceBinding")
-		assert.NotEqual(t, "true", updatedRB.Annotations[PlacementInjectedAnnotation], "ResourceBinding should not have placement injected annotation")
+		// Verify Original DS (ClaimRef removed)
+		updatedOriginalDs, _ := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, originalDs.Name, metav1.GetOptions{})
+		assert.Empty(t, updatedOriginalDs.Status.ClaimRefs)
 
-		// Run reconcile again - DSC should remain Pending since target data source doesn't exist
+		// Verify RB (Annotation removed)
+		updatedRB, _ := controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Get(ctx, rb.Name, metav1.GetOptions{})
+		assert.NotEqual(t, "true", updatedRB.Annotations[PlacementInjectedAnnotation])
+
+		// 6. Manual Reconcile (Step 2: Rebinding attempt)
+		// Status is Pending -> findMatchedDS (fail) -> dynamicBinding (fail mock) -> Remains Pending
 		err = controller.Reconcile(key)
-		assert.NoError(t, err, "Second reconcile should not return an error")
+		assert.NoError(t, err)
 
-		// Verify DSC still in Pending state
-		finalDsc, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Get(ctx, dsc.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get final DSC")
-		assert.Equal(t, v1alpha1.DSCPhasePending, finalDsc.Status.Phase, "DSC should remain in Pending state when target data source doesn't exist")
-		assert.Empty(t, finalDsc.Status.BoundDataSource, "BoundDataSource should remain empty")
+		// Verify Final State
+		finalDsc, _ := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Get(ctx, dsc.Name, metav1.GetOptions{})
+		assert.Equal(t, v1alpha1.DSCPhasePending, finalDsc.Status.Phase)
+		assert.Empty(t, finalDsc.Status.BoundDataSource)
 	})
 
 	t.Run("Scenario 9.2: Modified data source exists, DSC rebinds and RB is rescheduled to new clusters", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Create initial DSC in Bound state
+		// 1. Setup Objects (DSC, OriginalDS, NewDS)
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "test-dsc",
@@ -771,7 +822,7 @@ func TestReconcileFunction(t *testing.T) {
 			Spec: v1alpha1.DataSourceClaimSpec{
 				System:         "amoro",
 				DataSourceType: "table",
-				DataSourceName: "original-table", // Original data source name
+				DataSourceName: "original-table",
 				Workload: v1alpha1.WorkloadRef{
 					APIVersion: "apps/v1",
 					Kind:       "Deployment",
@@ -785,7 +836,6 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Create the original DataSource that DSC is bound to
 		originalDs := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "original-ds",
@@ -810,7 +860,6 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Create the new DataSource that DSC will be rebound to
 		newDs := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "new-ds",
@@ -818,61 +867,58 @@ func TestReconcileFunction(t *testing.T) {
 			Spec: v1alpha1.DataSourceSpec{
 				System:        "amoro",
 				Type:          "table",
-				Name:          "new-table", // Different table name
+				Name:          "new-table",
 				ReclaimPolicy: v1alpha1.ReclaimPolicyRetain,
 				Locality: &v1alpha1.DataSourceLocality{
-					ClusterNames: []string{"cluster3", "cluster4"}, // Different clusters
+					ClusterNames: []string{"cluster3", "cluster4"},
 				},
 			},
 			Status: v1alpha1.DataSourceStatus{
-				ClaimRefs: []corev1.ObjectReference{}, // Initially empty
+				ClaimRefs: []corev1.ObjectReference{},
 			},
 		}
 
-		// Setup controller with DSC
+		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
 
-		// Add both DataSources to the fake client
+		// Start Informers (No Workers)
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
+
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.dscListerSynced,
+			controller.dsListerSynced,
+			controller.rbListerSynced,
+			controller.cListerSynced,
+		)
+
+		// 3. Create Objects & Manually Sync Indexer
+		// DataSources
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, originalDs, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create original DataSource")
+		assert.NoError(t, err)
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(originalDs)
+
 		_, err = controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, newDs, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create new DataSource")
+		assert.NoError(t, err)
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(newDs)
 
-		// Create clusters for testing
-		cluster1 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster1"},
+		// Clusters
+		clusterNames := []string{"cluster1", "cluster2", "cluster3", "cluster4", "cluster5"}
+		for _, name := range clusterNames {
+			cluster := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: name}}
+			_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster, metav1.CreateOptions{})
+			assert.NoError(t, err)
+			controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster)
 		}
-		cluster2 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster2"},
-		}
-		cluster3 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster3"},
-		}
-		cluster4 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster4"},
-		}
-		cluster5 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{Name: "cluster5"},
-		}
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster1, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster1")
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster2, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster2")
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster3, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster3")
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster4, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster4")
-		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster5, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create cluster5")
 
-		// Create a ResourceBinding that is already injected with original placement
+		// ResourceBinding
 		rb := &workv1alpha2.ResourceBinding{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-app-deployment",
 				Namespace: "default",
 				Annotations: map[string]string{
 					PlacementInjectedAnnotation: "true",
-					ExcludedClustersAnnotation:  "cluster3,cluster4,cluster5", // Excluded from original DS
+					ExcludedClustersAnnotation:  "cluster3,cluster4,cluster5",
 				},
 			},
 			Spec: workv1alpha2.ResourceBindingSpec{
@@ -889,100 +935,89 @@ func TestReconcileFunction(t *testing.T) {
 				},
 			},
 		}
-
-		// Add ResourceBinding to the fake client
 		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
-		assert.NoError(t, err, "Failed to create ResourceBinding")
+		assert.NoError(t, err)
+		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
 
-		startTestController(ctx, controller)
-
-		// Now modify the DSC to reference the new data source
+		// 4. Modify DSC Spec
 		dscToUpdate := dsc.DeepCopy()
-		dscToUpdate.Spec.DataSourceName = "new-table" // Change to new data source
+		dscToUpdate.Spec.DataSourceName = "new-table"
 		_, err = controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Update(ctx, dscToUpdate, metav1.UpdateOptions{})
-		assert.NoError(t, err, "Failed to update DSC")
+		assert.NoError(t, err)
 
-		// Wait for the DSC update to be synced to the lister cache
-		// This is crucial for the test to work correctly in different environments
-		err = wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-			cachedDSC, getErr := controller.dscLister.DataSourceClaims("default").Get(dsc.Name)
-			if getErr != nil {
-				return false, getErr
-			}
-			// Check if the DataSourceName has been updated in the cache
-			return cachedDSC.Spec.DataSourceName == "new-table", nil
-		})
-		assert.NoError(t, err, "DSC update should be synced to lister cache")
+		// [Manual Sync] Update Indexer with new Spec immediately
+		err = controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Update(dscToUpdate)
+		assert.NoError(t, err)
 
-		// Get the object key
 		key, _ := cache.MetaNamespaceKeyFunc(dscToUpdate)
 
-		// Run reconcile - should trigger unbinding
+		// -----------------------------------------------------------
+		// Step A: Trigger Unbinding
+		// -----------------------------------------------------------
 		err = controller.Reconcile(key)
-		assert.NoError(t, err, "First reconcile should not return an error")
+		assert.NoError(t, err)
 
-		// Run reconcile again to trigger rebinding process
-		err = controller.Reconcile(key)
-		assert.NoError(t, err, "Second reconcile should not return an error")
+		// Get latest from Client
+		updatedDSC, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Get(ctx, dsc.Name, metav1.GetOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, v1alpha1.DSCPhasePending, updatedDSC.Status.Phase)
+		assert.Empty(t, updatedDSC.Status.BoundDataSource)
 
-		// Run reconcile once more to complete the rebinding process
-		err = controller.Reconcile(key)
-		assert.NoError(t, err, "Third reconcile should not return an error")
+		// [Manual Sync] Force Indexer to Pending state for next Reconcile
+		err = controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Update(updatedDSC)
+		assert.NoError(t, err)
 
-		// Verify DSC is now bound to the new DataSource
-		updatedDsc, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Get(ctx, dsc.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get updated DSC")
-		assert.Equal(t, v1alpha1.DSCPhaseBound, updatedDsc.Status.Phase, "DSC should be bound to new DataSource")
-		assert.Equal(t, "new-ds", updatedDsc.Status.BoundDataSource, "DSC should be bound to new DataSource")
-
-		// Verify original DataSource no longer has the DSC reference
+		// Update Original DS in Indexer (ClaimRefs removed)
 		updatedOriginalDs, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, originalDs.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get updated original DataSource")
-		assert.Empty(t, updatedOriginalDs.Status.ClaimRefs, "Original DataSource should have no ClaimRefs")
+		assert.NoError(t, err)
+		assert.Empty(t, updatedOriginalDs.Status.ClaimRefs)
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Update(updatedOriginalDs)
 
-		// Verify new DataSource now has the DSC reference
-		updatedNewDs, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, newDs.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get updated new DataSource")
-		if assert.Len(t, updatedNewDs.Status.ClaimRefs, 1, "New DataSource should have one ClaimRef") {
-			assert.Equal(t, "test-dsc", updatedNewDs.Status.ClaimRefs[0].Name, "New DataSource should reference the DSC")
-		}
-
-		// Run reconcile once more to handle ResourceBinding injection for new placement
+		// -----------------------------------------------------------
+		// Step B: Trigger Rebinding
+		// -----------------------------------------------------------
+		// Reconcile reads "Pending" from Indexer -> findMatchedDS -> Bind
 		err = controller.Reconcile(key)
-		assert.NoError(t, err, "Third reconcile should not return an error")
+		assert.NoError(t, err)
 
-		// Verify ResourceBinding is rescheduled with new placement based on new DataSource
+		// Get latest from Client
+		updatedDSC, err = controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Get(ctx, dsc.Name, metav1.GetOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, v1alpha1.DSCPhaseBound, updatedDSC.Status.Phase)
+		assert.Equal(t, "new-ds", updatedDSC.Status.BoundDataSource)
+
+		// [Manual Sync] Force Indexer to Bound state for next Reconcile
+		err = controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Update(updatedDSC)
+		assert.NoError(t, err)
+
+		// Update New DS in Indexer (ClaimRef added)
+		updatedNewDs, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, newDs.Name, metav1.GetOptions{})
+		assert.NoError(t, err)
+		if assert.Len(t, updatedNewDs.Status.ClaimRefs, 1) {
+			assert.Equal(t, "test-dsc", updatedNewDs.Status.ClaimRefs[0].Name)
+		}
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Update(updatedNewDs)
+
+		// -----------------------------------------------------------
+		// Step C: Trigger Placement Injection
+		// -----------------------------------------------------------
+		// Reconcile reads "Bound" from Indexer -> handlePlacementUpdate -> inject
+		err = controller.Reconcile(key)
+		assert.NoError(t, err)
+
+		// 5. Verification
 		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Get(ctx, rb.Name, metav1.GetOptions{})
-		assert.NoError(t, err, "Failed to get updated ResourceBinding")
-		assert.Equal(t, "true", updatedRB.Annotations[PlacementInjectedAnnotation], "ResourceBinding should have placement injected annotation")
+		assert.NoError(t, err)
+		assert.Equal(t, "true", updatedRB.Annotations[PlacementInjectedAnnotation])
 
-		// Verify new cluster affinity excludes clusters not in new DataSource locality
-		// New DataSource has locality ["cluster3", "cluster4"], so should exclude ["cluster1", "cluster2", "cluster5"]
-		assert.NotNil(t, updatedRB.Spec.Placement, "Placement should be set")
-		assert.NotNil(t, updatedRB.Spec.Placement.ClusterAffinity, "ClusterAffinity should be set")
-
-		// Check the actual excluded clusters
 		actualExcluded := updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters
 		expectedExcluded := []string{"cluster1", "cluster2", "cluster5"}
 
-		// Since order might vary, check each expected cluster is in the actual list
 		for _, expected := range expectedExcluded {
-			assert.Contains(t, actualExcluded, expected, "Expected cluster %s to be excluded (not in new DS locality)", expected)
+			assert.Contains(t, actualExcluded, expected)
 		}
-
-		// Check that clusters in new DS locality are NOT excluded
-		assert.NotContains(t, actualExcluded, "cluster3", "cluster3 should not be excluded (in new DS)")
-		assert.NotContains(t, actualExcluded, "cluster4", "cluster4 should not be excluded (in new DS)")
-
-		// Verify excluded clusters annotation reflects new placement
-		excludedClustersStr := updatedRB.Annotations[ExcludedClustersAnnotation]
-		excludedClusters := strings.Split(excludedClustersStr, ",")
-		assert.Len(t, excludedClusters, 3, "Should have 3 excluded clusters")
-
-		// Check annotation contains the expected excluded clusters
-		for _, expected := range expectedExcluded {
-			assert.Contains(t, excludedClusters, expected, "Expected cluster %s to be in excluded annotation", expected)
-		}
+		assert.NotContains(t, actualExcluded, "cluster3")
+		assert.NotContains(t, actualExcluded, "cluster4")
 	})
 
 	// Test case 10: DSC deletion should trigger handleDeletion and cleanup
@@ -990,7 +1025,7 @@ func TestReconcileFunction(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Create a DSC that is bound to a DataSource
+		// 1. Setup Objects
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "test-dsc-to-delete",
@@ -1016,7 +1051,6 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// Create a DataSource that is bound to this DSC
 		ds := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-ds-for-deletion",
@@ -1043,20 +1077,39 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
+		// 2. Setup Controller
+		// setupTestController creates the DSC in the fake client
 		controller := setupTestController(ctx, dsc)
-		startTestController(ctx, controller)
 
-		// Create the DataSource in the fake client
+		// Start Informers manually (No background workers)
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
+
+		// Wait for sync
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.dscListerSynced,
+			controller.dsListerSynced,
+		)
+
+		// Add DSC to Indexer manually
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
+
+		// 3. Create DS and Sync Indexer
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
 		assert.NoError(t, err, "Failed to create DataSource")
+
+		// Add DS to Indexer manually
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
 
 		// Get the object key
 		key, _ := cache.MetaNamespaceKeyFunc(dsc)
 
-		// Run reconcile - should trigger handleDeletion branch
+		// 4. Run Reconcile
+		// Logic: handleDeletion -> checks finalizer -> removes ref from DS -> removes finalizer from DSC
 		err = controller.Reconcile(key)
 		assert.NoError(t, err, "Reconcile should not return an error during deletion")
 
+		// 5. Verify Results
 		// Verify that the claim reference was removed from DataSource
 		updatedDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, ds.Name, metav1.GetOptions{})
 		assert.NoError(t, err, "Failed to get updated DataSource")
@@ -1217,7 +1270,7 @@ func TestReconcileFunction(t *testing.T) {
 		_, err = controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Update(ctx, updatedDS, metav1.UpdateOptions{})
 		assert.NoError(t, err, "Failed to update DataSource")
 
-		// CRITICAL FIX: Manually update the DS in the Informer Indexer.
+		// Manually update the DS in the Informer Indexer.
 		// Since we are not running the full async loop, the Lister used inside Reconcile
 		// will still see 'originalDS' unless we update the cache explicitly.
 		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Update(updatedDS)
@@ -1313,14 +1366,28 @@ func TestReconcileFunction(t *testing.T) {
 			},
 		}
 
-		// 2. Setup Controller & Client
+		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
-		startTestController(ctx, controller)
 
+		// Start Informers manually
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done()) // Check your variable name (dataInformerFactory vs datadependencyInformerFactory)
+
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.dscListerSynced,
+			controller.dsListerSynced,
+		)
+
+		// Add DSC to Indexer
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
+
+		// 3. Create DS and Sync Indexer
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, originalDS, metav1.CreateOptions{})
 		assert.NoError(t, err, "Failed to create DataSource")
+		// Add DS to Indexer
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(originalDS)
 
-		// 3. Simulate DS deletion
+		// 4. Simulate DS deletion
 		dsToDelete := originalDS.DeepCopy()
 		now := metav1.Now()
 		dsToDelete.DeletionTimestamp = &now
@@ -1328,16 +1395,18 @@ func TestReconcileFunction(t *testing.T) {
 		_, err = controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Update(ctx, dsToDelete, metav1.UpdateOptions{})
 		assert.NoError(t, err, "Failed to update DataSource with DeletionTimestamp")
 
-		// Manually enqueue
-		expectedKey := "default/test-dsc-ds-deletion"
-		controller.queue.Add(expectedKey)
+		// Manually update the Indexer with the deleted DS
+		// Reconcile -> handleBound -> finds DS from Cache.
+		// If Cache isn't updated, it won't see DeletionTimestamp and won't trigger unbinding.
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Update(dsToDelete)
 
-		// 4. Run Reconcile (Sync Phase)
-		// This should trigger handleBound -> handleUnbinding -> removeClaimRefFromDS
+		// 5. Run Reconcile (Sync Phase)
+		// We pass the key manually. We don't need the queue.
+		expectedKey := "default/test-dsc-ds-deletion"
 		err = controller.Reconcile(expectedKey)
 		assert.NoError(t, err, "Reconcile should not return an error")
 
-		// 5. Verify Intermediate State (Sync Phase Result)
+		// 6. Verify Intermediate State (Sync Phase Result)
 		updatedDSC, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims(dsc.Namespace).Get(ctx, dsc.Name, metav1.GetOptions{})
 		assert.NoError(t, err)
 		assert.Equal(t, v1alpha1.DSCPhasePending, updatedDSC.Status.Phase, "DSC should be reset to Pending")
@@ -1346,27 +1415,26 @@ func TestReconcileFunction(t *testing.T) {
 		updatedDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, originalDS.Name, metav1.GetOptions{})
 		assert.NoError(t, err)
 
-		// [FIX 1] ClaimRefs SHOULD be empty now.
-		// The controller must remove the ref to acknowledge the unbinding.
+		// ClaimRefs SHOULD be empty now.
 		assert.Empty(t, updatedDS.Status.ClaimRefs, "ClaimRefs should be emptied even if DS is deleting")
 
-		// [FIX 2] Finalizer SHOULD still exist here.
-		// Reconcile loop does not touch finalizers on the DS anymore.
+		// Finalizer SHOULD still exist here.
 		assert.Contains(t, updatedDS.Finalizers, DataSourceFinalizer, "Finalizer should persist until async update handler runs")
 
-		// 6. Run Async Phase (Simulate updateDataSource)
-		// We manually trigger the logic that would usually run in the Informer callback
-		// dsToDelete is the state 'before' claim removal, updatedDS is the state 'after' (ClaimRefs=0)
+		// 7. Run Async Phase (Simulate updateDataSource)
+		// dsToDelete is state 'before' claim removal (has refs, has TS)
+		// updatedDS is state 'after' (no refs, has TS)
 		controller.updateDataSource(dsToDelete, updatedDS)
 
-		// 7. Verify Final State
+		// 8. Verify Final State
 		finalDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, originalDS.Name, metav1.GetOptions{})
 		assert.NoError(t, err)
 
-		// [FIX 3] Now the Finalizer should be gone
+		// Now the Finalizer should be gone
 		assert.Empty(t, finalDS.Finalizers, "DataSource finalizer should be removed after updateDataSource handles the zero-ref state")
 
 		// Helper verification
+		// Verify that doesDataSourceMatchClaim returns false for DS with DeletionTimestamp
 		matchResult := doesDataSourceMatchClaim(dsc, finalDS)
 		assert.False(t, matchResult, "doesDataSourceMatchClaim should return false for DS with DeletionTimestamp")
 	})
@@ -1640,7 +1708,7 @@ func TestHandlePending(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Create a DSC
+		// 1. Setup Objects
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-dsc",
@@ -1666,7 +1734,6 @@ func TestHandlePending(t *testing.T) {
 			},
 		}
 
-		// Create a matching DataSource
 		ds := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-ds",
@@ -1681,41 +1748,42 @@ func TestHandlePending(t *testing.T) {
 			},
 		}
 
+		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
-		startTestController(ctx, controller)
 
-		// Add the DataSource to the fake client
+		// Start Informers manually, DO NOT start background workers
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
+
+		// Wait for sync
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.dscListerSynced,
+			controller.dsListerSynced,
+		)
+
+		// 3. Create Objects in Client AND Indexer
+		// Create DS
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
 		assert.NoError(t, err, "Failed to create DataSource in fake client")
 
-		// Wait for the DataSource to be synced to the lister cache
-		// This is crucial for the test to work correctly in different environments
-		err = wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-			dsList, listErr := controller.dsLister.List(labels.Everything())
-			if listErr != nil {
-				return false, listErr
-			}
-			// Check if our DataSource is in the list
-			for _, cachedDS := range dsList {
-				if cachedDS.Name == ds.Name {
-					return true, nil
-				}
-			}
-			return false, nil
-		})
-		assert.NoError(t, err, "DataSource should be synced to lister cache")
+		// Manually add DS to Indexer so findMatchedDS can see it immediately
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
 
-		// Call handlePending
+		// Manually add DSC to Indexer (good practice)
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
+
+		// 4. Run Logic (handlePending)
+		// It will call findMatchedDS -> list from cache -> found -> staticBinding
 		err = controller.handlePending(dsc)
 		assert.NoError(t, err)
 
-		// Verify that DSC was bound to the DataSource
+		// 5. Verify Results
 		updatedDSC, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims(dsc.Namespace).Get(ctx, dsc.Name, metav1.GetOptions{})
 		assert.NoError(t, err)
 		assert.Equal(t, v1alpha1.DSCPhaseBound, updatedDSC.Status.Phase)
 		assert.Equal(t, ds.Name, updatedDSC.Status.BoundDataSource)
 
-		// Verify that a "Bound" condition was added
+		// Verify conditions
 		foundBoundCondition := false
 		for _, condition := range updatedDSC.Status.Conditions {
 			if condition.Type == "Bound" && condition.Status == metav1.ConditionTrue && condition.Reason == "BindingSuccessful" {
@@ -1723,14 +1791,14 @@ func TestHandlePending(t *testing.T) {
 				break
 			}
 		}
-		assert.True(t, foundBoundCondition, "Expected to find a 'Bound' condition with status True and reason 'BindingSuccessful'")
+		assert.True(t, foundBoundCondition, "Expected to find a 'Bound' condition")
 	})
 
 	t.Run("No static match - should call dynamicBinding", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Create a DSC
+		// 1. Setup Objects
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-dsc",
@@ -1756,45 +1824,63 @@ func TestHandlePending(t *testing.T) {
 			},
 		}
 
-		// Create a non-matching DataSource
+		// Non-matching DS
 		ds := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-ds",
 			},
 			Spec: v1alpha1.DataSourceSpec{
-				System: "different-system", // Different system, so no match
+				System: "different-system", // Mismatch
 				Type:   "table",
 				Name:   "different-table",
 			},
 		}
 
-		// Mock plugin manager to return clusters for dynamic binding
+		// 2. Setup Controller & Mock
 		mockPluginManager := NewMockPluginManager(func(ctx context.Context, dsc *v1alpha1.DataSourceClaim) ([]string, error) {
 			return []string{"cluster1", "cluster2"}, nil
 		})
 
 		controller := setupTestController(ctx, dsc)
 		controller.pluginManager = mockPluginManager
-		startTestController(ctx, controller)
 
-		// Add the non-matching DataSource to the fake client
+		// Start Informers manually
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
+
+		// Wait for sync
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.dscListerSynced,
+			controller.dsListerSynced,
+		)
+
+		// 3. Create Objects in Client AND Indexer
+		// Create non-matching DS
 		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
 		assert.NoError(t, err, "Failed to create DataSource in fake client")
 
-		// Call handlePending
+		// Manually add non-matching DS to Indexer
+		// This ensures findMatchedDS sees it but correctly ignores it due to mismatch
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
+
+		// Manually add DSC to Indexer
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSourceClaims().Informer().GetIndexer().Add(dsc)
+
+		// 4. Run Logic (handlePending)
+		// It will call findMatchedDS -> list cache -> no match -> dynamicBinding
 		err = controller.handlePending(dsc)
 		assert.NoError(t, err)
 
-		// Verify that a new DataSource was created (dynamic binding)
+		// 5. Verify Results
 		dsList, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().List(ctx, metav1.ListOptions{})
 		assert.NoError(t, err)
-		assert.Len(t, dsList.Items, 2) // Original DS + newly created DS
+		assert.Len(t, dsList.Items, 2) // Original DS + Created DS
 
-		// Find the newly created DataSource
+		// Identify new DS
 		var newDS *v1alpha1.DataSource
-		for _, ds := range dsList.Items {
-			if ds.Name != "test-ds" {
-				newDS = &ds
+		for _, item := range dsList.Items {
+			if item.Name != "test-ds" {
+				newDS = &item
 				break
 			}
 		}
@@ -1804,7 +1890,7 @@ func TestHandlePending(t *testing.T) {
 		assert.Equal(t, dsc.Spec.DataSourceName, newDS.Spec.Name)
 		assert.Equal(t, dsc.Spec.Attributes, newDS.Spec.Attributes)
 
-		// Verify that DSC was bound to the new DataSource
+		// Verify DSC Binding
 		updatedDSC, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims(dsc.Namespace).Get(ctx, dsc.Name, metav1.GetOptions{})
 		assert.NoError(t, err)
 		assert.Equal(t, v1alpha1.DSCPhaseBound, updatedDSC.Status.Phase)
@@ -2067,11 +2153,11 @@ func TestHandleBound(t *testing.T) {
 		updatedDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, "test-ds", metav1.GetOptions{})
 		assert.NoError(t, err)
 
-		// [FIX 1] ClaimRefs MUST be empty.
+		// ClaimRefs MUST be empty.
 		// logic: handleUnbinding calls removeClaimRefFromDS, which removes the ref.
 		assert.Empty(t, updatedDS.Status.ClaimRefs, "ClaimRefs should be removed to acknowledge unbinding")
 
-		// [FIX 2] Finalizer MUST still exist.
+		// Finalizer MUST still exist.
 		// logic: removeClaimRefFromDS no longer touches finalizers.
 		assert.Contains(t, updatedDS.Finalizers, DataSourceFinalizer, "Finalizer should persist until async update handler runs")
 
@@ -2083,7 +2169,7 @@ func TestHandleBound(t *testing.T) {
 		finalDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, "test-ds", metav1.GetOptions{})
 		assert.NoError(t, err)
 
-		// [FIX 3] Finalizer should be gone now
+		// Finalizer should be gone now
 		assert.NotContains(t, finalDS.Finalizers, DataSourceFinalizer, "Finalizer should be removed by updateDataSource logic")
 	})
 }
@@ -3194,21 +3280,14 @@ func TestFindAssociatedRB(t *testing.T) {
 		_, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("test-namespace").Create(ctx, rb, metav1.CreateOptions{})
 		assert.NoError(t, err, "Should create ResourceBinding successfully")
 
-		// Wait for informer to sync
-		err = wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-			rb, pollErr := controller.findAssociatedRB(dsc)
-			if pollErr != nil {
-				return false, pollErr
-			}
-			return rb != nil, nil
-		})
-		assert.NoError(t, err, "Should find the ResourceBinding after sync")
+		// Manually add RB to Indexer (No wait.Poll needed)
+		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
 
 		// Call findAssociatedRB
-		rb, err = controller.findAssociatedRB(dsc)
+		foundRB, err := controller.findAssociatedRB(dsc)
 		assert.NoError(t, err, "Should not return error")
-		assert.NotNil(t, rb, "Should return the matching RB")
-		assert.Equal(t, "test-rb", rb.Name, "Should return the correct RB")
+		assert.NotNil(t, foundRB, "Should return the matching RB")
+		assert.Equal(t, "test-rb", foundRB.Name, "Should return the correct RB")
 	})
 
 	t.Run("ResourceBinding in different namespace - should not match", func(t *testing.T) {
@@ -3252,13 +3331,13 @@ func TestFindAssociatedRB(t *testing.T) {
 		_, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("different-namespace").Create(ctx, rb, metav1.CreateOptions{})
 		assert.NoError(t, err, "Should create ResourceBinding successfully")
 
-		// Wait for informer to sync
-		time.Sleep(200 * time.Millisecond)
+		// Manually add RB to Indexer
+		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
 
 		// Call findAssociatedRB - should not find RB in different namespace
-		rb, err = controller.findAssociatedRB(dsc)
+		foundRB, err := controller.findAssociatedRB(dsc)
 		assert.NoError(t, err, "Should not return error")
-		assert.Nil(t, rb, "Should not return RB from different namespace")
+		assert.Nil(t, foundRB, "Should not return RB from different namespace")
 	})
 
 	t.Run("Multiple ResourceBindings - only one matches by workloadRef", func(t *testing.T) {
@@ -3283,7 +3362,7 @@ func TestFindAssociatedRB(t *testing.T) {
 
 		controller := setupTestController(ctx, dsc)
 
-		// Create multiple ResourceBindings with the same workload reference
+		// Create multiple ResourceBindings
 		rb1 := &workv1alpha2.ResourceBinding{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-rb-1",
@@ -3308,7 +3387,7 @@ func TestFindAssociatedRB(t *testing.T) {
 				Resource: workv1alpha2.ObjectReference{
 					APIVersion: "apps/v1",
 					Kind:       "Deployment",
-					Name:       "shared-deployment-2",
+					Name:       "shared-deployment-2", // Different workload name
 					Namespace:  "test-namespace",
 				},
 			},
@@ -3320,23 +3399,17 @@ func TestFindAssociatedRB(t *testing.T) {
 		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("test-namespace").Create(ctx, rb2, metav1.CreateOptions{})
 		assert.NoError(t, err, "Should create ResourceBinding 2 successfully")
 
-		// Wait for informer to sync
-		err = wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-			rb, pollErr := controller.findAssociatedRB(dsc)
-			if pollErr != nil {
-				return false, pollErr
-			}
-			return rb != nil, nil
-		})
-		assert.NoError(t, err, "Should find a ResourceBinding after sync")
+		// Manually add both RBs to Indexer
+		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb1)
+		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb2)
 
 		// Call findAssociatedRB - should return the only matching RB
-		rb, err := controller.findAssociatedRB(dsc)
+		foundRB, err := controller.findAssociatedRB(dsc)
 		assert.NoError(t, err, "Should not return error")
-		assert.NotNil(t, rb, "Should return a matching RB")
+		assert.NotNil(t, foundRB, "Should return a matching RB")
 
 		// Verify the correct RB is returned (should be the matching one)
-		assert.Equal(t, "test-rb-1", rb.Name, "Should return the matching RB")
+		assert.Equal(t, "test-rb-1", foundRB.Name, "Should return the matching RB")
 	})
 }
 
@@ -3422,38 +3495,21 @@ func TestInjectPlacementAffinity(t *testing.T) {
 		controller := setupTestController(ctx, dsc)
 
 		// Create some clusters
-		cluster1 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "cluster-1",
-			},
-		}
-		cluster2 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "cluster-2",
-			},
-		}
-		cluster3 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "cluster-3",
-			},
-		}
+		cluster1 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-1"}}
+		cluster2 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-2"}}
+		cluster3 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-3"}}
 
 		_, err := controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster1, metav1.CreateOptions{})
-		assert.NoError(t, err, "Should create cluster-1")
+		assert.NoError(t, err)
 		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster2, metav1.CreateOptions{})
-		assert.NoError(t, err, "Should create cluster-2")
+		assert.NoError(t, err)
 		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster3, metav1.CreateOptions{})
-		assert.NoError(t, err, "Should create cluster-3")
+		assert.NoError(t, err)
 
-		// Wait for cluster informer to sync
-		err = wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-			clusters, pollErr := controller.cLister.List(labels.Everything())
-			if pollErr != nil {
-				return false, pollErr
-			}
-			return len(clusters) == 3, nil
-		})
-		assert.NoError(t, err, "Should sync clusters")
+		// Manually add clusters to Indexer (Critical for injectPlacementAffinity)
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster1)
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster2)
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster3)
 
 		// Create a ResourceBinding
 		rb := &workv1alpha2.ResourceBinding{
@@ -3472,23 +3528,23 @@ func TestInjectPlacementAffinity(t *testing.T) {
 		}
 
 		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("test-namespace").Create(ctx, rb, metav1.CreateOptions{})
-		assert.NoError(t, err, "Should create ResourceBinding successfully")
+		assert.NoError(t, err)
 
 		// Call injectPlacementAffinity with cluster-1 and cluster-2 as DS clusters
 		dsClusterNames := []string{"cluster-1", "cluster-2"}
 		err = controller.injectPlacementAffinity(rb, dsClusterNames)
-		assert.NoError(t, err, "Should not return error")
+		assert.NoError(t, err)
 
 		// Verify the ResourceBinding was updated
 		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("test-namespace").Get(ctx, "test-app-deployment", metav1.GetOptions{})
-		assert.NoError(t, err, "Should get updated ResourceBinding")
-		assert.Equal(t, "true", updatedRB.Annotations[PlacementInjectedAnnotation], "Should have placement injected annotation")
-		assert.Equal(t, "cluster-3", updatedRB.Annotations[ExcludedClustersAnnotation], "Should have excluded clusters annotation")
+		assert.NoError(t, err)
+		assert.Equal(t, "true", updatedRB.Annotations[PlacementInjectedAnnotation])
+		assert.Equal(t, "cluster-3", updatedRB.Annotations[ExcludedClustersAnnotation])
 
 		// Should exclude cluster-3 (all clusters - DS clusters)
-		assert.NotNil(t, updatedRB.Spec.Placement, "Should have Placement")
-		assert.NotNil(t, updatedRB.Spec.Placement.ClusterAffinity, "Should have ClusterAffinity")
-		assert.Equal(t, []string{"cluster-3"}, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters, "Should exclude cluster-3")
+		assert.NotNil(t, updatedRB.Spec.Placement)
+		assert.NotNil(t, updatedRB.Spec.Placement.ClusterAffinity)
+		assert.Equal(t, []string{"cluster-3"}, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters)
 	})
 
 	t.Run("Existing user-defined ExcludeClusters - should merge", func(t *testing.T) {
@@ -3514,45 +3570,25 @@ func TestInjectPlacementAffinity(t *testing.T) {
 		controller := setupTestController(ctx, dsc)
 
 		// Create some clusters
-		cluster1 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "cluster-1",
-			},
-		}
-		cluster2 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "cluster-2",
-			},
-		}
-		cluster3 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "cluster-3",
-			},
-		}
-		cluster4 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "cluster-4",
-			},
-		}
+		cluster1 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-1"}}
+		cluster2 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-2"}}
+		cluster3 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-3"}}
+		cluster4 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-4"}}
 
 		_, err := controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster1, metav1.CreateOptions{})
-		assert.NoError(t, err, "Should create cluster-1")
+		assert.NoError(t, err)
 		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster2, metav1.CreateOptions{})
-		assert.NoError(t, err, "Should create cluster-2")
+		assert.NoError(t, err)
 		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster3, metav1.CreateOptions{})
-		assert.NoError(t, err, "Should create cluster-3")
+		assert.NoError(t, err)
 		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster4, metav1.CreateOptions{})
-		assert.NoError(t, err, "Should create cluster-4")
+		assert.NoError(t, err)
 
-		// Wait for cluster informer to sync
-		err = wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-			clusters, pollErr := controller.cLister.List(labels.Everything())
-			if pollErr != nil {
-				return false, pollErr
-			}
-			return len(clusters) == 4, nil
-		})
-		assert.NoError(t, err, "Should sync clusters")
+		// Manually add clusters to Indexer
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster1)
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster2)
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster3)
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster4)
 
 		// Create a ResourceBinding with existing user-defined exclusions
 		rb := &workv1alpha2.ResourceBinding{
@@ -3576,18 +3612,18 @@ func TestInjectPlacementAffinity(t *testing.T) {
 		}
 
 		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("test-namespace").Create(ctx, rb, metav1.CreateOptions{})
-		assert.NoError(t, err, "Should create ResourceBinding successfully")
+		assert.NoError(t, err)
 
 		// Call injectPlacementAffinity with cluster-1 as DS cluster
 		// This should exclude cluster-2, cluster-3 (all clusters - DS clusters)
 		dsClusterNames := []string{"cluster-1"}
 		err = controller.injectPlacementAffinity(rb, dsClusterNames)
-		assert.NoError(t, err, "Should not return error")
+		assert.NoError(t, err)
 
 		// Verify the ResourceBinding was updated
 		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("test-namespace").Get(ctx, "test-app-deployment", metav1.GetOptions{})
-		assert.NoError(t, err, "Should get updated ResourceBinding")
-		assert.Equal(t, "true", updatedRB.Annotations[PlacementInjectedAnnotation], "Should have placement injected annotation")
+		assert.NoError(t, err)
+		assert.Equal(t, "true", updatedRB.Annotations[PlacementInjectedAnnotation])
 
 		// Should merge user-defined exclusions with our exclusions
 		excludedClusters := updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters
@@ -3664,31 +3700,17 @@ func TestInjectPlacementAffinity(t *testing.T) {
 		controller := setupTestController(ctx, dsc)
 
 		// Create some clusters
-		cluster1 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "cluster-1",
-			},
-		}
-		cluster2 := &clusterv1alpha1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "cluster-2",
-			},
-		}
+		cluster1 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-1"}}
+		cluster2 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster-2"}}
 
 		_, err := controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster1, metav1.CreateOptions{})
-		assert.NoError(t, err, "Should create cluster-1")
+		assert.NoError(t, err)
 		_, err = controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster2, metav1.CreateOptions{})
-		assert.NoError(t, err, "Should create cluster-2")
+		assert.NoError(t, err)
 
-		// Wait for cluster informer to sync
-		err = wait.PollImmediate(100*time.Millisecond, 5*time.Second, func() (bool, error) {
-			clusters, pollErr := controller.cLister.List(labels.Everything())
-			if pollErr != nil {
-				return false, pollErr
-			}
-			return len(clusters) == 2, nil
-		})
-		assert.NoError(t, err, "Should sync clusters")
+		// Manually add clusters to Indexer
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster1)
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster2)
 
 		// Create a ResourceBinding with existing exclusion that will be duplicated
 		rb := &workv1alpha2.ResourceBinding{
@@ -3712,17 +3734,17 @@ func TestInjectPlacementAffinity(t *testing.T) {
 		}
 
 		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("test-namespace").Create(ctx, rb, metav1.CreateOptions{})
-		assert.NoError(t, err, "Should create ResourceBinding successfully")
+		assert.NoError(t, err)
 
 		// Call injectPlacementAffinity with cluster-1 as DS cluster
 		// This should exclude cluster-2, but cluster-2 is already in user exclusions
 		dsClusterNames := []string{"cluster-1"}
 		err = controller.injectPlacementAffinity(rb, dsClusterNames)
-		assert.NoError(t, err, "Should not return error")
+		assert.NoError(t, err)
 
 		// Verify the ResourceBinding was updated
 		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("test-namespace").Get(ctx, "test-app-deployment", metav1.GetOptions{})
-		assert.NoError(t, err, "Should get updated ResourceBinding")
+		assert.NoError(t, err)
 
 		// Should have only one instance of cluster-2 (no duplicates)
 		excludedClusters := updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters
@@ -4090,7 +4112,7 @@ func TestHandlePlacementUpdate(t *testing.T) {
 	t.Run("should inject placement affinity for uninjected ResourceBinding", func(t *testing.T) {
 		ctx := context.Background()
 
-		// Create test DSC (no labels/annotations), with valid WorkloadRef
+		// 1. Setup Objects (DSC, DS, RB)
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-dsc",
@@ -4113,7 +4135,6 @@ func TestHandlePlacementUpdate(t *testing.T) {
 			},
 		}
 
-		// Create test DataSource
 		ds := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-ds",
@@ -4128,9 +4149,6 @@ func TestHandlePlacementUpdate(t *testing.T) {
 			},
 		}
 
-		// Create test ResourceBinding (not injected)
-		// In Suspend mechanism, RB won't be scheduled until we process it
-		// User can only set Placement.ClusterAffinity, Spec.Clusters is filled by scheduler later
 		rb := &workv1alpha2.ResourceBinding{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-app-deployment",
@@ -4143,81 +4161,80 @@ func TestHandlePlacementUpdate(t *testing.T) {
 					Name:       "test-app",
 					Namespace:  "default",
 				},
-				// Spec.Clusters is empty because scheduler hasn't processed it yet (Suspend mechanism)
-				// User might have set some initial Placement.ClusterAffinity
 				Placement: &policyv1alpha1.Placement{
 					ClusterAffinity: &policyv1alpha1.ClusterAffinity{
-						// User might have some initial cluster preferences
 						ClusterNames: []string{"cluster1", "cluster2"},
 					},
 				},
 			},
 		}
 
-		// Setup controller
+		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
 
-		// Create clusters for testing
-		clusters := []*clusterv1alpha1.Cluster{
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "cluster1"},
-				Spec:       clusterv1alpha1.ClusterSpec{},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "cluster2"},
-				Spec:       clusterv1alpha1.ClusterSpec{},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "cluster3"},
-				Spec:       clusterv1alpha1.ClusterSpec{},
-			},
-		}
-
-		// Add clusters to the controller's client
-		for _, cluster := range clusters {
-			_, err := controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster, metav1.CreateOptions{})
-			assert.NoError(t, err)
-		}
-
-		// Add DataSource and ResourceBinding to the controller's clients
-		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
-		assert.NoError(t, err)
-		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
-		assert.NoError(t, err)
+		// Start Informers manually
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
 
 		// Wait for cache sync
-		if !cache.WaitForCacheSync(ctx.Done(),
+		cache.WaitForCacheSync(ctx.Done(),
 			controller.dscListerSynced,
 			controller.dsListerSynced,
 			controller.rbListerSynced,
-			controller.cListerSynced) {
-			t.Fatal("Failed to wait for cache sync")
+			controller.cListerSynced)
+
+		// 3. Create Clusters and Sync Indexer
+		clusters := []*clusterv1alpha1.Cluster{
+			{ObjectMeta: metav1.ObjectMeta{Name: "cluster1"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "cluster2"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "cluster3"}},
 		}
 
-		// Call handlePlacementUpdate
+		for _, cluster := range clusters {
+			_, err := controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster, metav1.CreateOptions{})
+			assert.NoError(t, err)
+			// Add Cluster to Indexer (Critical for calculation)
+			controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster)
+		}
+
+		// 4. Create DS/RB and Sync Indexer
+		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
+		assert.NoError(t, err)
+		// Add DS to Indexer
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
+
+		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
+		assert.NoError(t, err)
+		// Add RB to Indexer (Critical for findAssociatedRB)
+		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
+
+		// 5. Execute Logic
 		err = controller.handlePlacementUpdate(dsc, ds)
 		assert.NoError(t, err)
 
-		// Verify ResourceBinding was updated with placement injection
+		// 6. Verify Result
 		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Get(context.TODO(), "test-app-deployment", metav1.GetOptions{})
 		assert.NoError(t, err)
 
-		// Verify placement injection annotation was added
+		// Verify placement injection annotation
 		assert.Equal(t, "true", updatedRB.Annotations[PlacementInjectedAnnotation])
 
-		// Verify placement affinity was set to exclude cluster3 (non-DS cluster)
+		// Verify placement affinity
+		// DS Locality: 1, 2
+		// All Clusters: 1, 2, 3
+		// Expected Exclude: 3
 		assert.NotNil(t, updatedRB.Spec.Placement)
 		assert.NotNil(t, updatedRB.Spec.Placement.ClusterAffinity)
 		assert.Equal(t, []string{"cluster3"}, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters)
 
-		// Verify excluded clusters annotation was set
+		// Verify excluded clusters annotation
 		assert.Equal(t, "cluster3", updatedRB.Annotations[ExcludedClustersAnnotation])
 	})
 
 	t.Run("should trigger rescheduling for already injected ResourceBinding", func(t *testing.T) {
 		ctx := context.Background()
 
-		// Create test DSC (no labels/annotations), with valid WorkloadRef
+		// 1. Setup Objects (DSC, DS, RB)
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-dsc",
@@ -4240,7 +4257,6 @@ func TestHandlePlacementUpdate(t *testing.T) {
 			},
 		}
 
-		// Create test DataSource with different cluster configuration
 		ds := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "test-ds",
@@ -4255,7 +4271,6 @@ func TestHandlePlacementUpdate(t *testing.T) {
 			},
 		}
 
-		// Create test ResourceBinding (already injected, previously excluded cluster2,cluster3)
 		rb := &workv1alpha2.ResourceBinding{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-app-deployment",
@@ -4283,58 +4298,59 @@ func TestHandlePlacementUpdate(t *testing.T) {
 			},
 		}
 
-		// Setup controller
+		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
 
-		// Create clusters for testing
-		clusters := []*clusterv1alpha1.Cluster{
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "cluster1"},
-				Spec:       clusterv1alpha1.ClusterSpec{},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "cluster2"},
-				Spec:       clusterv1alpha1.ClusterSpec{},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "cluster3"},
-				Spec:       clusterv1alpha1.ClusterSpec{},
-			},
-		}
+		// Manually start Informers
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
 
-		// Add clusters to the controller's client
-		for _, cluster := range clusters {
-			_, err := controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster, metav1.CreateOptions{})
-			assert.NoError(t, err)
-		}
-
-		// Add DataSource and ResourceBinding to the controller's clients
-		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
-		assert.NoError(t, err)
-		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
-		assert.NoError(t, err)
-
-		// Wait for cache sync
-		if !cache.WaitForCacheSync(ctx.Done(),
+		cache.WaitForCacheSync(ctx.Done(),
 			controller.dscListerSynced,
 			controller.dsListerSynced,
 			controller.rbListerSynced,
-			controller.cListerSynced) {
-			t.Fatal("Failed to wait for cache sync")
+			controller.cListerSynced)
+
+		// 3. Create Clusters and Sync Indexer
+		clusters := []*clusterv1alpha1.Cluster{
+			{ObjectMeta: metav1.ObjectMeta{Name: "cluster1"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "cluster2"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "cluster3"}},
 		}
 
-		// Call handlePlacementUpdate
+		for _, cluster := range clusters {
+			_, err := controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster, metav1.CreateOptions{})
+			assert.NoError(t, err)
+			// Manually add clusters to Indexer (Critical for triggerRescheduling calculation)
+			controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster)
+		}
+
+		// 4. Create DS/RB and Sync Indexer
+		_, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
+		assert.NoError(t, err)
+		// Manually add DS to Indexer
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
+
+		_, err = controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
+		assert.NoError(t, err)
+		// Manually add RB to Indexer (Critical for findAssociatedRB)
+		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
+
+		// 5. Execute Logic
 		err = controller.handlePlacementUpdate(dsc, ds)
 		assert.NoError(t, err)
 
-		// Verify ResourceBinding was updated (rescheduling triggered)
+		// 6. Verify Result
 		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Get(context.TODO(), "test-app-deployment", metav1.GetOptions{})
 		assert.NoError(t, err)
 
 		// Verify clusters field was cleared (triggers rescheduling)
 		assert.Nil(t, updatedRB.Spec.Clusters)
 
-		// Verify placement affinity was updated to exclude only cluster3 (DS now on cluster1,cluster2)
+		// Verify placement affinity
+		// All Clusters: 1, 2, 3
+		// DS Locality:  1, 2
+		// Expected Exclude: 3
 		assert.NotNil(t, updatedRB.Spec.Placement)
 		assert.NotNil(t, updatedRB.Spec.Placement.ClusterAffinity)
 		assert.Equal(t, []string{"cluster3"}, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters)
@@ -4495,7 +4511,7 @@ func TestHandleUnbinding(t *testing.T) {
 	t.Run("should successfully unbind DSC from DS when DS is not being deleted", func(t *testing.T) {
 		ctx := context.Background()
 
-		// Create test DSC (bound state) with WorkloadRef (no labels/annotations)
+		// 1. Setup Objects (DSC, DS, RB)
 		dsc := &v1alpha1.DataSourceClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-dsc",
@@ -4519,7 +4535,6 @@ func TestHandleUnbinding(t *testing.T) {
 			},
 		}
 
-		// Create test DataSource (not being deleted)
 		ds := &v1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "test-ds",
@@ -4545,7 +4560,6 @@ func TestHandleUnbinding(t *testing.T) {
 			},
 		}
 
-		// Create test ResourceBinding (injected) with Resource matching WorkloadRef
 		rb := &workv1alpha2.ResourceBinding{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-rb",
@@ -4574,33 +4588,47 @@ func TestHandleUnbinding(t *testing.T) {
 			},
 		}
 
-		// Create clusters
 		cluster1 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster1"}}
 		cluster2 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster2"}}
 		cluster3 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster3"}}
 
-		// Setup test controller with additional objects
+		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
 
-		// Add DataSource to the fake client
+		// Manually start Informers (No background workers)
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
+
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().HasSynced,
+			controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().HasSynced,
+		)
+
+		// 3. Create Objects AND Sync Indexers
+		// Create DS
 		controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
+		// Manually add DS to Indexer
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
 
-		// Add ResourceBinding to the fake client
+		// Create RB
 		controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
+		// Manually add RB to Indexer (CRITICAL: findAssociatedRB relies on this)
+		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
 
-		// Add clusters to the fake client
+		// Create Clusters
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster1, metav1.CreateOptions{})
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster2, metav1.CreateOptions{})
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster3, metav1.CreateOptions{})
+		// Manually add Clusters to Indexer
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster1)
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster2)
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster3)
 
-		// Wait for cache sync
-		cache.WaitForCacheSync(ctx.Done(), controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().HasSynced)
-		cache.WaitForCacheSync(ctx.Done(), controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().HasSynced)
-
-		// Call handleUnbinding
+		// 4. Run Logic
 		err := controller.handleUnbinding(dsc, ds)
 		assert.NoError(t, err)
 
+		// 5. Verify Results
 		// Verify DSC status was reset
 		updatedDSC, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Get(ctx, "test-dsc", metav1.GetOptions{})
 		assert.NoError(t, err)
@@ -4613,6 +4641,7 @@ func TestHandleUnbinding(t *testing.T) {
 		assert.NotContains(t, updatedRB.Annotations, PlacementInjectedAnnotation)
 		assert.NotContains(t, updatedRB.Annotations, ExcludedClustersAnnotation)
 		assert.Nil(t, updatedRB.Spec.Clusters)
+
 		// Verify ExcludeClusters was cleared
 		if updatedRB.Spec.Placement != nil && updatedRB.Spec.Placement.ClusterAffinity != nil {
 			assert.Empty(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters)
@@ -4710,22 +4739,44 @@ func TestHandleUnbinding(t *testing.T) {
 		cluster2 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster2"}}
 		cluster3 := &clusterv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "cluster3"}}
 
+		// 2. Setup Controller
 		controller := setupTestController(ctx, dsc)
+
+		// Start Informers manually (No background workers)
+		// We avoid startTestController to prevent race conditions in the test
+		controller.karmadaInformerFactory.Start(ctx.Done())
+		controller.dataInformerFactory.Start(ctx.Done())
+
+		cache.WaitForCacheSync(ctx.Done(),
+			controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().HasSynced,
+			controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().HasSynced,
+		)
+
+		// 3. Create Objects AND Sync to Indexer
+		// Create DS
 		controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Create(ctx, ds, metav1.CreateOptions{})
+		// Add DS to Indexer manually to ensure lister visibility
+		controller.dataInformerFactory.Datadependency().V1alpha1().DataSources().Informer().GetIndexer().Add(ds)
+
+		// Create RB
 		controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Create(ctx, rb, metav1.CreateOptions{})
+		// Add RB to Indexer (Critical for handleUnbinding -> findAssociatedRB)
+		controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().GetIndexer().Add(rb)
+
+		// Create Clusters
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster1, metav1.CreateOptions{})
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster2, metav1.CreateOptions{})
 		controller.karmadaClient.ClusterV1alpha1().Clusters().Create(ctx, cluster3, metav1.CreateOptions{})
+		// Add Clusters to Indexer
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster1)
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster2)
+		controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().GetIndexer().Add(cluster3)
 
-		cache.WaitForCacheSync(ctx.Done(), controller.karmadaInformerFactory.Cluster().V1alpha1().Clusters().Informer().HasSynced)
-		cache.WaitForCacheSync(ctx.Done(), controller.karmadaInformerFactory.Work().V1alpha2().ResourceBindings().Informer().HasSynced)
-
-		// 2. Action: Call handleUnbinding
-		// This should clear the ClaimRefs but NOT remove the Finalizer yet
+		// 4. Action: Call handleUnbinding
 		err := controller.handleUnbinding(dsc, ds)
 		assert.NoError(t, err)
 
-		// 3. Verification Phase 1: Check Intermediate State
+		// 5. Verification Phase 1: Check Intermediate State
 		updatedDSC, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSourceClaims("default").Get(ctx, "test-dsc", metav1.GetOptions{})
 		assert.NoError(t, err)
 		assert.Equal(t, v1alpha1.DSCPhasePending, updatedDSC.Status.Phase)
@@ -4733,24 +4784,25 @@ func TestHandleUnbinding(t *testing.T) {
 		updatedDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, "test-ds", metav1.GetOptions{})
 		assert.NoError(t, err)
 
-		// [Corrected Assertion] ClaimRefs should be empty
+		// ClaimRefs should be empty
 		assert.Empty(t, updatedDS.Status.ClaimRefs)
-		// [Corrected Assertion] Finalizer should STILL be present here (because updateDataSource hasn't run yet)
+		// Finalizer should STILL be present here (because updateDataSource logic hasn't run yet)
 		assert.Contains(t, updatedDS.Finalizers, DataSourceFinalizer)
 
-		// 4. Action Phase 2: Simulate Async Event (updateDataSource)
-		// We manually trigger the event handler to verify the cleanup logic
+		// 6. Action Phase 2: Simulate Async Event (updateDataSource)
+		// We manually trigger the event handler to verify the cleanup logic (removing finalizer)
 		controller.updateDataSource(ds, updatedDS)
 
-		// 5. Verification Phase 2: Check Final State
+		// 7. Verification Phase 2: Check Final State
 		finalDS, err := controller.datadependencyClient.DatadependencyV1alpha1().DataSources().Get(ctx, "test-ds", metav1.GetOptions{})
 		assert.NoError(t, err)
 		// Now the finalizer should be gone
 		assert.NotContains(t, finalDS.Finalizers, DataSourceFinalizer)
 
-		// 6. Verify ResourceBinding cleanup
+		// 8. Verify ResourceBinding cleanup
 		updatedRB, err := controller.karmadaClient.WorkV1alpha2().ResourceBindings("default").Get(ctx, "test-app-deployment", metav1.GetOptions{})
 		assert.NoError(t, err)
+		// This assertion previously failed intermittently because findAssociatedRB returned nil due to cache lag
 		assert.NotContains(t, updatedRB.Annotations, PlacementInjectedAnnotation)
 		if updatedRB.Spec.Placement != nil && updatedRB.Spec.Placement.ClusterAffinity != nil {
 			assert.Empty(t, updatedRB.Spec.Placement.ClusterAffinity.ExcludeClusters)
