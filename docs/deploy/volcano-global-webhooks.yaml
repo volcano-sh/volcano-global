@@ -12,10 +12,10 @@ webhooks:
     matchPolicy: Equivalent
     reinvocationPolicy: Never
     rules:
-      - operations: ["CREATE"]
-        apiGroups: ["work.karmada.io"]
-        apiVersions: ["v1alpha2"]
-        resources: ["resourcebindings"]
+      - operations: [ "CREATE", "UPDATE" ]
+        apiGroups: [ "work.karmada.io" ]
+        apiVersions: [ "v1alpha2" ]
+        resources: [ "resourcebindings" ]
         scope: "Namespaced"
     sideEffects: None
     timeoutSeconds: 3
