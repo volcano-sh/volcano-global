@@ -90,6 +90,50 @@ kubectl --context karmada-apiserver apply -f https://github.com/volcano-sh/volca
 
 ## 5. Deploy the volcano-global controller and webhook manager at Karmada control plane cluster
 
+### Option A: Install via Helm Chart (Recommended)
+
+**Simple Installation:**
+
+```bash
+# Switch to Karmada host kubeconfig.
+export KUBECONFIG=$HOME/.kube/karmada.config
+
+# Step 1: Create namespace in both clusters
+# - karmada-apiserver: for leader election
+# - karmada-host: for deploying components
+kubectl --context karmada-apiserver apply -f docs/deploy/volcano-global-namespace.yaml
+kubectl --context karmada-host apply -f docs/deploy/volcano-global-namespace.yaml
+
+# Step 2: Install to karmada-host cluster
+helm install volcano-global installer/helm/chart/volcano-global \
+  --namespace volcano-global
+```
+
+
+**Customize installation:**
+
+```bash
+helm install volcano-global installer/helm/chart/volcano-global \
+  --namespace volcano-global \
+  --set basic.image_tag_version=v1.0.0 \
+  --set custom.controller_replicas=2
+```
+
+**Upgrade:**
+
+```bash
+helm upgrade volcano-global installer/helm/chart/volcano-global \
+  --namespace volcano-global
+```
+
+**Uninstall:**
+
+```bash
+helm uninstall volcano-global --namespace volcano-global
+```
+
+### Option B: Install via YAML files
+
 ```bash
 # Switch to Karmada host kubeconfig.
 export KUBECONFIG=$HOME/.kube/karmada.config
@@ -111,6 +155,8 @@ kubectl --context karmada-apiserver apply -f docs/deploy/volcano-global-webhooks
 We need to add a `custom resource interpreter` for the `Volcano` job to synchronize
 the job status to the `Karmada control plane`.
 
+**Note:** This step applies to both Helm and YAML installation methods.
+
 ```bash
 # Switch to Karmada host kubeconfig.
 export KUBECONFIG=$HOME/.kube/karmada.config
@@ -131,6 +177,8 @@ that **this `PropagationPolicy` will be protected** in the form of labels
 to prevent unintended consequences due to accidental deletion.
 
 [Resource Deletion Protection](https://karmada.io/docs/next/administrator/configuration/resource-deletion-protection/)
+
+**Note:** This step applies to both Helm and YAML installation methods.
 
 ```bash
 # Switch to Karmada host kubeconfig.

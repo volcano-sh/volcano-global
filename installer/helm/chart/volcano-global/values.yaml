@@ -1,0 +1,140 @@
+basic:
+  controller_image_name: "volcanosh/volcano-global-controller-manager"
+  webhook_image_name: "volcanosh/volcano-global-webhook-manager"
+  image_pull_secret: ""
+  image_pull_policy: "IfNotPresent"
+  image_tag_version: "latest"
+  image_registry: "docker.io"
+  webhook_secret_name: "volcano-global-webhook-cert"
+  webhook_service_name: "volcano-global-webhook"
+  karmada_kubeconfig_secret_name: "karmada-webhook-config"
+  karmada_kubeconfig_path: "/etc/kubeconfig/karmada.config"
+
+custom:
+  controller_enable: true
+  controller_replicas: 1
+  controller_log_level: 5
+  webhook_enable: true
+  webhook_replicas: 1
+  webhook_log_level: 5
+  leader_elect_enable: false
+  leader_elect_resource_namespace: "volcano-global"
+  dispatch_period: "1s"
+  controllers: "dispatcher"
+  # Uncomment to enable HyperJob controller
+  # controllers: "dispatcher,reconciler"
+  # reconcilers: "hyperjob"
+  # Uncomment to enable DataDependency features
+  # controllers: "dispatcher,datadependency-controller"
+  # feature_gates: "DataDependencyAwareness=true"
+  enabled_admissions: "/resourcebindings/mutate,/jobs/mutate,/jobs/validate"
+  webhook_port: 8443
+  healthz_port: 11251
+  enable_healthz: true
+  # These resources must be applied to karmada-apiserver, not karmada-host
+  # They are excluded from helm chart by default and should be applied separately
+  enable_resource_interpreter: false
+  enable_propagation_policy: false
+  protect_propagation_policy: true
+
+# Override the configuration for controller or webhook.
+# For example:
+#  controller_config_override: |
+#    # custom config
+  controller_config_override: ~
+  webhook_config_override: ~
+
+# Specify affinity for all main components or per component.
+# For example:
+#
+#  default_affinity:
+#    podAntiAffinity:
+#      preferredDuringSchedulingIgnoredDuringExecution:
+#        - podAffinityTerm:
+#            labelSelector:
+#              matchLabels:
+#                key: value
+#            topologyKey: kubernetes.io/hostname
+#          weight: 49
+  default_affinity: ~
+  controller_affinity: ~
+  webhook_affinity: ~
+
+# Specify tolerations for all main components or per component
+# For example:
+#
+#  default_tolerations:
+#  - key: "example-key1"
+#    operator: "Exists"
+#    effect: "NoSchedule"
+  default_tolerations: ~
+  controller_tolerations: ~
+  webhook_tolerations: ~
+
+# Specify securityContext for all main components or per component
+# For example:
+#
+#  default_sc:
+#    runAsUser: 3000
+#    runAsGroup: 3000
+  default_sc: ~
+  controller_sc: ~
+  webhook_sc: ~
+
+# Specify nodeSelector for all main components or per component
+# For example:
+#
+#  default_ns:
+#    nodetype: criticalservices
+  default_ns: ~
+  controller_ns: ~
+  webhook_ns: ~
+
+# Specify labels for components deployments and pods
+# For example:
+#
+#  controller_podLabels:
+#    key1: value1
+  controller_podLabels: ~
+  webhook_podLabels: ~
+  controller_labels: ~
+  webhook_labels: ~
+
+# Specify labels for all helm chart objects except for CRDs
+  common_labels: ~
+
+# Specify resources for components deployments and pods
+# For example:
+#
+#  controller_resources:
+#    limits:
+#      cpu: 500m
+#      memory: 512Mi
+#    requests:
+#      cpu: 100m
+#      memory: 128Mi
+  controller_resources: ~
+  webhook_resources: ~
+
+# Specify container security context for components
+# For example:
+#
+# default_csc:
+#   allowPrivilegeEscalation: false
+#   runAsUser: 2000
+  default_csc:
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      add: ["DAC_OVERRIDE"]
+      drop: ["ALL"]
+    allowPrivilegeEscalation: false
+  controller_main_csc: ~
+  webhook_main_csc: ~
+  webhook_init_csc: ~
+
+service:
+  # @param service.ipFamilyPolicy [string], support SingleStack, PreferDualStack and RequireDualStack
+  ipFamilyPolicy: ""
+  # @param service.ipFamilies [array] List of IP families (e.g. IPv4, IPv6) assigned to the service.
+  ipFamilies: []
