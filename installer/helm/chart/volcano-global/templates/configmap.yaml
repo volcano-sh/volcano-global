@@ -1,0 +1,14 @@
+{{- if .Values.datasourcePlugins.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: volcano-global-datasource-plugins
+  namespace: {{ include "volcano-global.namespace" . }}
+  labels:
+    {{- include "volcano-global.labels" . | nindent 4 }}
+data:
+  {{- range $name, $config := .Values.datasourcePlugins.plugins }}
+  {{ $name }}: |
+    {{ $config | nindent 4 }}
+  {{- end }}
+{{- end }}

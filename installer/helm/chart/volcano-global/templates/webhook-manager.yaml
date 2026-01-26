@@ -1,0 +1,227 @@
+{{- if .Values.webhookManager.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: volcano-global-webhook-manager
+  namespace: {{ include "volcano-global.namespace" . }}
+  labels:
+    {{- include "volcano-global.webhookManager.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.webhookManager.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "volcano-global.webhookManager.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "volcano-global.webhookManager.selectorLabels" . | nindent 8 }}
+      {{- with .Values.webhookManager.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webhookManager.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webhookManager.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webhookManager.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webhookManager.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: volcano-global-webhook-manager
+          image: {{ include "volcano-global.webhookManager.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.webhookManager.securityContext | default .Values.defaultSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          args:
+            {{- include "volcano-global.webhookManager.args" . | nindent 12 }}
+          env:
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          {{- if .Values.webhookManager.healthz.enabled }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.webhookManager.healthz.port }}
+              scheme: HTTPS
+            failureThreshold: {{ .Values.webhookManager.livenessProbe.failureThreshold }}
+            initialDelaySeconds: {{ .Values.webhookManager.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.webhookManager.livenessProbe.periodSeconds }}
+            successThreshold: {{ .Values.webhookManager.livenessProbe.successThreshold }}
+            timeoutSeconds: {{ .Values.webhookManager.livenessProbe.timeoutSeconds }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.webhookManager.healthz.port }}
+              scheme: HTTPS
+            failureThreshold: {{ .Values.webhookManager.readinessProbe.failureThreshold }}
+            initialDelaySeconds: {{ .Values.webhookManager.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.webhookManager.readinessProbe.periodSeconds }}
+            successThreshold: {{ .Values.webhookManager.readinessProbe.successThreshold }}
+            timeoutSeconds: {{ .Values.webhookManager.readinessProbe.timeoutSeconds }}
+          {{- end }}
+          {{- with .Values.webhookManager.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: admission-certs
+              mountPath: /admission.local.config/certificates
+              readOnly: true
+            - name: webhook-config
+              mountPath: {{ .Values.karmada.kubeconfigMountPath }}
+              readOnly: true
+      volumes:
+        - name: webhook-config
+          secret:
+            secretName: {{ .Values.karmada.kubeconfigSecretName }}
+        - name: admission-certs
+          secret:
+            secretName: volcano-global-webhook-cert
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.webhookManager.serviceName }}
+  namespace: {{ include "volcano-global.namespace" . }}
+  labels:
+    {{- include "volcano-global.webhookManager.labels" . | nindent 4 }}
+spec:
+  ports:
+    - port: 443
+      protocol: TCP
+      targetPort: {{ .Values.webhookManager.port }}
+  selector:
+    {{- include "volcano-global.webhookManager.selectorLabels" . | nindent 4 }}
+  {{- if .Values.service.ipFamilyPolicy }}
+  ipFamilyPolicy: {{ .Values.service.ipFamilyPolicy }}
+  {{- end }}
+  {{- if .Values.service.ipFamilies }}
+  ipFamilies:
+    {{- toYaml .Values.service.ipFamilies | nindent 4 }}
+  {{- end }}
+{{- end }}
+---
+{{- if and .Values.webhookManager.enabled .Values.webhookManager.admissionInit.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: volcano-global-webhook-init-sa
+  namespace: {{ include "volcano-global.namespace" . }}
+  labels:
+    {{- include "volcano-global.admissionInit.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "0"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: volcano-global-webhook-init-clusterrole
+  labels:
+    {{- include "volcano-global.admissionInit.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "0"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: volcano-global-webhook-init-clusterrolebinding
+  labels:
+    {{- include "volcano-global.admissionInit.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "0"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: volcano-global-webhook-init-clusterrole
+subjects:
+  - kind: ServiceAccount
+    name: volcano-global-webhook-init-sa
+    namespace: {{ include "volcano-global.namespace" . }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: volcano-global-admission-init
+  namespace: {{ include "volcano-global.namespace" . }}
+  labels:
+    {{- include "volcano-global.admissionInit.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "5"
+spec:
+  backoffLimit: {{ .Values.webhookManager.admissionInit.backoffLimit }}
+  template:
+    spec:
+      serviceAccountName: volcano-global-webhook-init-sa
+      restartPolicy: Never
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webhookManager.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webhookManager.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webhookManager.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webhookManager.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: main
+          image: {{ include "volcano-global.webhookManager.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - ./gen-admission-secret.sh
+            - --service
+            - {{ .Values.webhookManager.serviceName }}
+            - --namespace
+            - {{ include "volcano-global.namespace" . }}
+            - --secret
+            - volcano-global-webhook-cert
+          {{- with .Values.webhookManager.securityContext | default .Values.defaultSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.webhookManager.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

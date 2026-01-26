@@ -1,0 +1,102 @@
+{{- if .Values.webhooks.enabled }}
+{{- if .Values.webhooks.resourceBindingsMutate.enabled }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: volcano-admission-service-resourcebindings-mutate
+  labels:
+    {{- include "volcano-global.labels" . | nindent 4 }}
+webhooks:
+  - name: mutateresourcebindings.volcano.sh
+    admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: {{ .Values.webhookManager.serviceName }}
+        namespace: {{ include "volcano-global.namespace" . }}
+        path: /resourcebindings/mutate
+        port: 443
+      {{- $secret := lookup "v1" "Secret" (include "volcano-global.namespace" .) .Values.webhookManager.certSecretName }}
+      {{- if $secret }}
+      caBundle: {{ index $secret.data "ca.crt" }}
+      {{- end }}
+    failurePolicy: {{ .Values.webhooks.resourceBindingsMutate.failurePolicy }}
+    matchPolicy: Equivalent
+    reinvocationPolicy: Never
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: ["work.karmada.io"]
+        apiVersions: ["v1alpha2"]
+        resources: ["resourcebindings"]
+        scope: "Namespaced"
+    sideEffects: None
+    timeoutSeconds: {{ .Values.webhooks.resourceBindingsMutate.timeoutSeconds }}
+{{- end }}
+---
+{{- if .Values.webhooks.jobsMutate.enabled }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: volcano-admission-service-jobs-mutate
+  labels:
+    {{- include "volcano-global.labels" . | nindent 4 }}
+webhooks:
+  - name: mutatejob.volcano.sh
+    admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: {{ .Values.webhookManager.serviceName }}
+        namespace: {{ include "volcano-global.namespace" . }}
+        path: /jobs/mutate
+        port: 443
+      {{- $secret := lookup "v1" "Secret" (include "volcano-global.namespace" .) .Values.webhookManager.certSecretName }}
+      {{- if $secret }}
+      caBundle: {{ index $secret.data "ca.crt" }}
+      {{- end }}
+    failurePolicy: {{ .Values.webhooks.jobsMutate.failurePolicy }}
+    matchPolicy: Equivalent
+    reinvocationPolicy: Never
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: ["batch.volcano.sh"]
+        apiVersions: ["v1alpha1"]
+        resources: ["jobs"]
+        scope: "Namespaced"
+    sideEffects: NoneOnDryRun
+    timeoutSeconds: {{ .Values.webhooks.jobsMutate.timeoutSeconds }}
+{{- end }}
+---
+{{- if .Values.webhooks.jobsValidate.enabled }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: volcano-admission-service-jobs-validate
+  labels:
+    {{- include "volcano-global.labels" . | nindent 4 }}
+webhooks:
+  - name: validatejob.volcano.sh
+    admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: {{ .Values.webhookManager.serviceName }}
+        namespace: {{ include "volcano-global.namespace" . }}
+        path: /jobs/validate
+        port: 443
+      {{- $secret := lookup "v1" "Secret" (include "volcano-global.namespace" .) .Values.webhookManager.certSecretName }}
+      {{- if $secret }}
+      caBundle: {{ index $secret.data "ca.crt" }}
+      {{- end }}
+    failurePolicy: {{ .Values.webhooks.jobsValidate.failurePolicy }}
+    matchPolicy: Equivalent
+    rules:
+      - operations: ["CREATE", "UPDATE"]
+        apiGroups: ["batch.volcano.sh"]
+        apiVersions: ["v1alpha1"]
+        resources: ["jobs"]
+        scope: "Namespaced"
+    sideEffects: NoneOnDryRun
+    timeoutSeconds: {{ .Values.webhooks.jobsValidate.timeoutSeconds }}
+{{- end }}
+{{- end }}

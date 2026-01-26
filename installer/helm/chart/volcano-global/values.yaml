@@ -1,0 +1,288 @@
+# -- Namespace configuration
+namespace:
+  # -- Name of the namespace where volcano-global will be deployed
+  name: volcano-global
+  # -- Create the namespace (set to false if it already exists)
+  create: true
+
+# -- Global image configuration
+image:
+  # -- Image registry
+  registry: volcanosh
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Image tag (defaults to Chart appVersion)
+  tag: ""
+  # -- Image pull secrets
+  pullSecrets: []
+
+# -- Controller Manager configuration
+controllerManager:
+  # -- Enable controller manager deployment
+  enabled: true
+  # -- Controller manager replica count
+  replicaCount: 1
+  # -- Controller manager image name
+  imageName: volcano-global-controller-manager
+  # -- Container resource requests and limits
+  resources: {}
+    # limits:
+    #   cpu: 500m
+    #   memory: 512Mi
+    # requests:
+    #   cpu: 250m
+    #   memory: 256Mi
+  
+  # -- Controllers to enable (comma-separated)
+  # Options: dispatcher, reconciler
+  controllers: "dispatcher"
+  
+  # -- Reconcilers to enable when reconciler controller is enabled
+  # Options: hyperjob
+  reconcilers: ""
+  
+  # -- Feature gates configuration
+  featureGates: {}
+    # DataDependencyAwareness: true
+  
+  # -- Dispatch period for the dispatcher
+  dispatchPeriod: "1s"
+  
+  # -- Enable leader election
+  leaderElect: false
+  
+  # -- Leader election resource namespace
+  leaderElectResourceNamespace: volcano-global
+  
+  # -- Logging verbosity level
+  logLevel: 5
+  
+  # -- Health check configuration
+  healthz:
+    enabled: true
+    port: 11251
+  
+  # -- Metrics configuration
+  metrics:
+    port: 9090
+  
+  # -- Liveness probe configuration
+  livenessProbe:
+    failureThreshold: 5
+    initialDelaySeconds: 60
+    periodSeconds: 3
+    successThreshold: 1
+    timeoutSeconds: 5
+  
+  # -- Readiness probe configuration
+  readinessProbe:
+    failureThreshold: 5
+    initialDelaySeconds: 3
+    periodSeconds: 3
+    successThreshold: 1
+    timeoutSeconds: 5
+  
+  # -- Node selector for pod assignment
+  nodeSelector: {}
+  
+  # -- Tolerations for pod assignment
+  tolerations: []
+  
+  # -- Affinity for pod assignment
+  affinity: {}
+  
+  # -- Pod annotations
+  podAnnotations: {}
+  
+  # -- Pod security context
+  podSecurityContext: {}
+  
+  # -- Container security context
+  securityContext: {}
+
+# -- Webhook Manager configuration
+webhookManager:
+  # -- Enable webhook manager deployment
+  enabled: true
+  # -- Webhook manager replica count
+  replicaCount: 1
+  # -- Webhook manager image name
+  imageName: volcano-global-webhook-manager
+  # -- Container resource requests and limits
+  resources: {}
+    # limits:
+    #   cpu: 500m
+    #   memory: 512Mi
+    # requests:
+    #   cpu: 250m
+    #   memory: 256Mi
+  
+  # -- Enabled admission webhooks
+  enabledAdmissions: "/resourcebindings/mutate,/jobs/mutate,/jobs/validate"
+  
+  # -- Webhook service name
+  serviceName: volcano-global-webhook
+  
+  # -- Certificate secret name (created by admission-init job)
+  certSecretName: volcano-global-webhook-cert
+  
+  # -- Webhook server port
+  port: 8443
+  
+  # -- Logging verbosity level
+  logLevel: 5
+  
+  # -- Health check configuration
+  healthz:
+    enabled: true
+    port: 11251
+  
+  # -- Liveness probe configuration
+  livenessProbe:
+    failureThreshold: 5
+    initialDelaySeconds: 60
+    periodSeconds: 3
+    successThreshold: 1
+    timeoutSeconds: 5
+  
+  # -- Readiness probe configuration
+  readinessProbe:
+    failureThreshold: 5
+    initialDelaySeconds: 3
+    periodSeconds: 3
+    successThreshold: 1
+    timeoutSeconds: 5
+  
+  # -- Admission init job configuration
+  admissionInit:
+    # -- Enable admission init job
+    enabled: true
+    # -- Backoff limit for the job
+    backoffLimit: 3
+  
+  # -- Node selector for pod assignment
+  nodeSelector: {}
+  
+  # -- Tolerations for pod assignment
+  tolerations: []
+  
+  # -- Affinity for pod assignment
+  affinity: {}
+  
+  # -- Pod annotations
+  podAnnotations: {}
+  
+  # -- Pod security context
+  podSecurityContext: {}
+  
+  # -- Container security context
+  securityContext: {}
+
+# -- Webhook configurations
+webhooks:
+  # -- Enable webhook configurations
+  enabled: true
+  
+  # -- Mutating webhook for ResourceBindings
+  resourceBindingsMutate:
+    enabled: true
+    failurePolicy: Fail
+    timeoutSeconds: 3
+  
+  # -- Mutating webhook for Jobs
+  jobsMutate:
+    enabled: true
+    failurePolicy: Fail
+    timeoutSeconds: 10
+  
+  # -- Validating webhook for Jobs
+  jobsValidate:
+    enabled: true
+    failurePolicy: Fail
+    timeoutSeconds: 10
+
+# -- Resource Interpreter Customizations
+resourceInterpreters:
+  # -- Enable resource interpreter customizations
+  enabled: true
+  
+  # -- VCJob (Volcano Job) resource interpreter
+  vcjob:
+    enabled: true
+  
+  # -- Queue resource interpreter
+  queue:
+    enabled: true
+
+# -- Propagation Policies
+propagationPolicies:
+  # -- Enable propagation policies
+  enabled: true
+  
+  # -- All Queue propagation policy
+  allQueue:
+    # -- Enable all-queue ClusterPropagationPolicy
+    enabled: true
+    # -- Enable deletion protection
+    deletionProtected: true
+
+# -- Karmada configuration
+karmada:
+  # -- Name of the secret containing Karmada kubeconfig
+  kubeconfigSecretName: karmada-webhook-config
+  # -- Key in the secret containing the kubeconfig
+  kubeconfigSecretKey: karmada.config
+  # -- Mount path for the kubeconfig
+  kubeconfigMountPath: /etc/kubeconfig
+
+# -- Datasource plugins ConfigMap (for DataDependency feature)
+datasourcePlugins:
+  # -- Enable datasource plugins ConfigMap
+  enabled: false
+  # -- Plugin configurations (as JSON strings)
+  plugins: {}
+    # amoro: |
+    #   {
+    #     "system": "amoro",
+    #     "endpoint": {
+    #       "url": "http://your-amoro-server.com",
+    #       "port": 1630
+    #     },
+    #     "locationMapping": {
+    #       "s3://your-warehouse-dc1/": ["cluster1", "cluster2"],
+    #       "s3://your-warehouse-dc2/": ["cluster3"]
+    #     },
+    #     "retryConfig": {
+    #       "maxRetries": 3,
+    #       "initialBackoff": "1s",
+    #       "maxBackoff": "30s",
+    #       "backoffMultiplier": 2.0,
+    #       "timeout": "30s"
+    #     }
+    #   }
+
+# -- Service account configuration
+serviceAccount:
+  # -- Annotations to add to the service account
+  annotations: {}
+
+# -- Common labels to add to all resources
+commonLabels: {}
+
+# -- Service configuration for webhook
+service:
+  # -- IP family policy (SingleStack, PreferDualStack, RequireDualStack)
+  ipFamilyPolicy: ""
+  # -- IP families (IPv4, IPv6)
+  ipFamilies: []
+
+# -- Default security context for all containers
+defaultSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault

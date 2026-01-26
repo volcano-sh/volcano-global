@@ -1,0 +1,12 @@
+apiVersion: v2
+name: volcano-global
+description: A Helm chart for deploying Volcano-global
+version: "1.0.0"
+appVersion: "1.0.0"
+home: https://github.com/volcano-sh/volcano-global
+icon: https://raw.githubusercontent.com/volcano-sh/charts/master/docs/images/volcano-logo.png
+sources:
+  - https://github.com/volcano-sh/volcano-global
+maintainers:
+  - name: volcano-global-maintainers
+    email: volcano-global@volcano.sh
