@@ -78,6 +78,18 @@ images:
 unit-test:
 	go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
 
+# E2E test targets
+.PHONY: e2e-test
+e2e-test:
+	hack/run-e2e.sh
+
+.PHONY: local-up-volcano-global
+local-up-volcano-global:
+	hack/local-up-volcano-global.sh
+
+.PHONY: e2e-test-local
+e2e-test-local: local-up-volcano-global e2e-test
+
 clean:
 	rm -rf _output/
 	rm -f *.log
