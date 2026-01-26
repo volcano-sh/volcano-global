@@ -123,6 +123,9 @@ webhookManager:
   # -- Webhook service name
   serviceName: volcano-global-webhook
   
+  # -- Certificate secret name (created by admission-init job)
+  certSecretName: volcano-global-webhook-cert
+  
   # -- Webhook server port
   port: 8443
   

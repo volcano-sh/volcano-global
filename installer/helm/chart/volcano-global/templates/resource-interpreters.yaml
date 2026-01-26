@@ -40,7 +40,7 @@ spec:
           if observedObj == nil or observedObj.status == nil then
             return false
           end
-          return observedObj.status.phase == Running
+          return observedObj.status.phase == "Running"
         end
     statusReflection:
       luaScript: >
@@ -197,24 +197,30 @@ spec:
           local states = {}
           for i = 1, #statusItems do
             local status = statusItems[i].status
-            if status ~= nil and status.allocated ~= nil then
-              for key, value in pairs(status.allocated) do
-                if aggregatedStatus.allocated[key] == nil then
-                  aggregatedStatus.allocated[key] = value
-                else
-                  if key == "cpu" then
-                    local currentCpu = parseCpu(aggregatedStatus.allocated[key])
-                    local newCpu = parseCpu(value)
-                    aggregatedStatus.allocated[key] = formatCpu(currentCpu + newCpu)
-                  elseif key == "memory" then
-                    local currentMemory = parseMemory(aggregatedStatus.allocated[key])
-                    local newMemory = parseMemory(value)
-                    aggregatedStatus.allocated[key] = formatMemory(currentMemory + newMemory)
-                  elseif isNumericField(value) then  
-                    local currentValue = tonumber(aggregatedStatus.allocated[key])
-                    local newValue = tonumber(value)
-                    if currentValue ~= nil and newValue ~= nil then
-                      aggregatedStatus.allocated[key] = tostring(currentValue + newValue)
+            if status ~= nil then
+              if status.state ~= nil then
+                table.insert(states, status.state)
+              end
+
+              if status.allocated ~= nil then
+                for key, value in pairs(status.allocated) do
+                  if aggregatedStatus.allocated[key] == nil then
+                    aggregatedStatus.allocated[key] = value
+                  else
+                    if key == "cpu" then
+                      local currentCpu = parseCpu(aggregatedStatus.allocated[key])
+                      local newCpu = parseCpu(value)
+                      aggregatedStatus.allocated[key] = formatCpu(currentCpu + newCpu)
+                    elseif key == "memory" then
+                      local currentMemory = parseMemory(aggregatedStatus.allocated[key])
+                      local newMemory = parseMemory(value)
+                      aggregatedStatus.allocated[key] = formatMemory(currentMemory + newMemory)
+                    elseif isNumericField(value) then  
+                      local currentValue = tonumber(aggregatedStatus.allocated[key])
+                      local newValue = tonumber(value)
+                      if currentValue ~= nil and newValue ~= nil then
+                        aggregatedStatus.allocated[key] = tostring(currentValue + newValue)
+                      end
                     end
                   end
                 end

@@ -11,7 +11,15 @@ webhooks:
     admissionReviewVersions:
       - v1
     clientConfig:
-      url: https://{{ .Values.webhookManager.serviceName }}.{{ include "volcano-global.namespace" . }}.svc:443/resourcebindings/mutate
+      service:
+        name: {{ .Values.webhookManager.serviceName }}
+        namespace: {{ include "volcano-global.namespace" . }}
+        path: /resourcebindings/mutate
+        port: 443
+      {{- $secret := lookup "v1" "Secret" (include "volcano-global.namespace" .) .Values.webhookManager.certSecretName }}
+      {{- if $secret }}
+      caBundle: {{ index $secret.data "ca.crt" }}
+      {{- end }}
     failurePolicy: {{ .Values.webhooks.resourceBindingsMutate.failurePolicy }}
     matchPolicy: Equivalent
     reinvocationPolicy: Never
@@ -37,7 +45,15 @@ webhooks:
     admissionReviewVersions:
       - v1
     clientConfig:
-      url: https://{{ .Values.webhookManager.serviceName }}.{{ include "volcano-global.namespace" . }}.svc:443/jobs/mutate
+      service:
+        name: {{ .Values.webhookManager.serviceName }}
+        namespace: {{ include "volcano-global.namespace" . }}
+        path: /jobs/mutate
+        port: 443
+      {{- $secret := lookup "v1" "Secret" (include "volcano-global.namespace" .) .Values.webhookManager.certSecretName }}
+      {{- if $secret }}
+      caBundle: {{ index $secret.data "ca.crt" }}
+      {{- end }}
     failurePolicy: {{ .Values.webhooks.jobsMutate.failurePolicy }}
     matchPolicy: Equivalent
     reinvocationPolicy: Never
@@ -63,7 +79,15 @@ webhooks:
     admissionReviewVersions:
       - v1
     clientConfig:
-      url: https://{{ .Values.webhookManager.serviceName }}.{{ include "volcano-global.namespace" . }}.svc:443/jobs/validate
+      service:
+        name: {{ .Values.webhookManager.serviceName }}
+        namespace: {{ include "volcano-global.namespace" . }}
+        path: /jobs/validate
+        port: 443
+      {{- $secret := lookup "v1" "Secret" (include "volcano-global.namespace" .) .Values.webhookManager.certSecretName }}
+      {{- if $secret }}
+      caBundle: {{ index $secret.data "ca.crt" }}
+      {{- end }}
     failurePolicy: {{ .Values.webhooks.jobsValidate.failurePolicy }}
     matchPolicy: Equivalent
     rules:

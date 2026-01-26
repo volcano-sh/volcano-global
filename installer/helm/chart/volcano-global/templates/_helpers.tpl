@@ -106,7 +106,6 @@ Build controller manager arguments
 - --feature-gates={{ $key }}={{ $value }}
 {{- end }}
 - -v={{ .Values.controllerManager.logLevel }}
-- 2>&1
 {{- end }}
 
 {{/*
@@ -128,5 +127,4 @@ Build webhook manager arguments
 - --listen-address=$(MY_POD_IP)
 - --port={{ .Values.webhookManager.port }}
 - -v={{ .Values.webhookManager.logLevel }}
-- 2>&1
 {{- end }}
