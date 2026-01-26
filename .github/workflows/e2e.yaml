@@ -1,0 +1,122 @@
+# Copyright 2025 The Volcano Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# E2E Tests Workflow for volcano-global
+#
+# TODO:
+# - Add code coverage reporting integration
+# - Add performance benchmarking tests
+# - Add upgrade/migration tests
+# - Consider adding ARM64 testing matrix
+# - Add scheduled nightly runs for extended tests
+
+name: E2E Tests
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+  pull_request:
+    branches:
+      - main
+
+# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#concurrency
+concurrency:
+  group: ${{ github.workflow }}-${{ github.actor }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # Support latest Kubernetes minor versions
+        # https://kubernetes.io/releases/
+        k8s: [v1.32.0, v1.33.0, v1.34.0]
+    steps:
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        run: |
+          # Install kind for creating Kubernetes clusters
+          GO111MODULE="on" go install sigs.k8s.io/kind@v0.30.0
+          
+          # Install kubectl
+          curl -LO "https://dl.k8s.io/release/${{ matrix.k8s }}/bin/linux/amd64/kubectl"
+          sudo install kubectl /usr/local/bin/kubectl
+          
+          # Install ginkgo for running e2e tests
+          go install github.com/onsi/ginkgo/v2/ginkgo@latest
+
+      - name: Setup E2E test environment
+        env:
+          CLUSTER_VERSION: kindest/node:${{ matrix.k8s }}
+        run: |
+          export ARTIFACTS_PATH=${{ github.workspace }}/e2e-logs/${{ matrix.k8s }}
+          mkdir -p ${ARTIFACTS_PATH}
+          hack/local-up-volcano-global.sh
+
+      - name: Run E2E tests
+        run: |
+          export ARTIFACTS_PATH=${{ github.workspace }}/e2e-logs/${{ matrix.k8s }}
+          hack/run-e2e.sh
+
+      - name: Upload E2E logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: volcano-global-e2e-logs-${{ matrix.k8s }}
+          path: ${{ github.workspace }}/e2e-logs/${{ matrix.k8s }}/
+
+      - name: Upload kind cluster logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: volcano-global-kind-logs-${{ matrix.k8s }}
+          path: /tmp/volcano-global/
