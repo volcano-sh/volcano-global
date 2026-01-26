@@ -57,15 +57,14 @@ var _ = Describe("Basic E2E Tests", func() {
 		})
 
 		It("should verify volcano-global controller is running", func() {
+			By("Checking volcano-global namespace exists")
 			ctx := context.Background()
-
-			// Get pods in volcano-global namespace from karmada-host
-			// We need to use a separate client for karmada-host
-			By("Checking volcano-global-controller-manager is running")
-
-			// Verify the deployment exists via Karmada API
 			_, err := framework.KarmadaClient.CoreV1().Namespaces().Get(ctx, "volcano-global", metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred(), "volcano-global namespace should exist")
+
+			By("Checking volcano-global-controller-manager deployment is ready")
+			err = framework.WaitForDeploymentReady("volcano-global", "volcano-global-controller-manager", 2*time.Minute)
+			Expect(err).NotTo(HaveOccurred(), "volcano-global-controller-manager deployment should be ready")
 		})
 	})
 
@@ -191,6 +190,12 @@ var _ = Describe("Basic E2E Tests", func() {
 			ns, err := framework.KarmadaClient.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ns.Name).To(Equal(namespace))
+
+			By("Verifying test namespace is ready on member clusters")
+			memberClusters := framework.GetMemberClusters()
+			Expect(memberClusters).NotTo(BeEmpty(), "Expected at least one member cluster")
+			err = framework.WaitForNamespaceReady(namespace, memberClusters...)
+			Expect(err).NotTo(HaveOccurred(), "Test namespace should be ready on member clusters")
 		})
 	})
 })

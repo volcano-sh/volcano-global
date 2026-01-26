@@ -104,9 +104,11 @@ collect_logs() {
     kubectl --context karmada-host -n karmada-system logs -l app=karmada-scheduler --tail=5000 > "${log_dir}/karmada-scheduler.log" 2>&1 || true
     kubectl --context karmada-host -n karmada-system logs -l app=karmada-webhook --tail=5000 > "${log_dir}/karmada-webhook.log" 2>&1 || true
     
-    # Collect member cluster logs
+    # Collect member cluster logs (dynamically based on NUM_MEMBER_CLUSTERS)
     export KUBECONFIG="${MEMBERS_CONFIG}"
-    for member in member1 member2; do
+    local num_clusters=${NUM_MEMBER_CLUSTERS:-2}
+    for i in $(seq 1 ${num_clusters}); do
+        local member="member${i}"
         log_info "Collecting ${member} cluster logs..."
         mkdir -p "${log_dir}/${member}"
         kubectl --context "${member}" cluster-info dump --output-directory="${log_dir}/${member}" || true

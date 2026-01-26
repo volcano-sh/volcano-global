@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -132,7 +133,16 @@ func Initialize() error {
 	MemberClients = make(map[string]kubernetes.Interface)
 	MemberVolcanoClients = make(map[string]volcanoclientset.Interface)
 
-	for _, member := range []string{"member1", "member2"} {
+	// Get number of member clusters from environment or default to 2
+	numMemberClusters := 2
+	if numStr := os.Getenv("NUM_MEMBER_CLUSTERS"); numStr != "" {
+		if num, err := strconv.Atoi(numStr); err == nil && num > 0 {
+			numMemberClusters = num
+		}
+	}
+
+	for i := 1; i <= numMemberClusters; i++ {
+		member := fmt.Sprintf("member%d", i)
 		config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 			&clientcmd.ClientConfigLoadingRules{ExplicitPath: membersKubeconfig},
 			&clientcmd.ConfigOverrides{CurrentContext: member},
@@ -281,4 +291,24 @@ func WaitForNamespaceReady(nsName string, memberClusters ...string) error {
 		}
 	}
 	return nil
+}
+
+// WaitForDeploymentReady waits for a deployment to be ready
+func WaitForDeploymentReady(namespace, deploymentName string, timeout time.Duration) error {
+	By(fmt.Sprintf("Waiting for deployment %s/%s to be ready", namespace, deploymentName))
+
+	return WaitForCondition(timeout, func() (bool, error) {
+		dep, err := KarmadaClient.AppsV1().Deployments(namespace).Get(context.Background(), deploymentName, metav1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				return false, nil
+			}
+			return false, err
+		}
+		// Check if deployment is ready
+		if dep.Status.ReadyReplicas == *dep.Spec.Replicas && dep.Status.ReadyReplicas > 0 {
+			return true, nil
+		}
+		return false, nil
+	})
 }
