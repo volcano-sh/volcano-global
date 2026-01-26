@@ -1,0 +1,93 @@
+{{- if .Values.controllerManager.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: volcano-global-controller-manager
+  namespace: {{ include "volcano-global.namespace" . }}
+  labels:
+    {{- include "volcano-global.controllerManager.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.controllerManager.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "volcano-global.controllerManager.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "volcano-global.controllerManager.selectorLabels" . | nindent 8 }}
+      {{- with .Values.controllerManager.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controllerManager.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controllerManager.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controllerManager.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controllerManager.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: volcano-global-controller-manager
+          image: {{ include "volcano-global.controllerManager.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.controllerManager.securityContext | default .Values.defaultSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          args:
+            {{- include "volcano-global.controllerManager.args" . | nindent 12 }}
+          env:
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          {{- if .Values.controllerManager.healthz.enabled }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.controllerManager.healthz.port }}
+              scheme: HTTP
+            failureThreshold: {{ .Values.controllerManager.livenessProbe.failureThreshold }}
+            initialDelaySeconds: {{ .Values.controllerManager.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.controllerManager.livenessProbe.periodSeconds }}
+            successThreshold: {{ .Values.controllerManager.livenessProbe.successThreshold }}
+            timeoutSeconds: {{ .Values.controllerManager.livenessProbe.timeoutSeconds }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.controllerManager.healthz.port }}
+              scheme: HTTP
+            failureThreshold: {{ .Values.controllerManager.readinessProbe.failureThreshold }}
+            initialDelaySeconds: {{ .Values.controllerManager.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.controllerManager.readinessProbe.periodSeconds }}
+            successThreshold: {{ .Values.controllerManager.readinessProbe.successThreshold }}
+            timeoutSeconds: {{ .Values.controllerManager.readinessProbe.timeoutSeconds }}
+          {{- end }}
+          {{- with .Values.controllerManager.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: webhook-config
+              mountPath: {{ .Values.karmada.kubeconfigMountPath }}
+              readOnly: true
+      volumes:
+        - name: webhook-config
+          secret:
+            secretName: {{ .Values.karmada.kubeconfigSecretName }}
+{{- end }}

@@ -1,17 +1,100 @@
-# Deploy `Volcano-global` Guide
-
-# The Structure of the whole multi-cluster
+# Volcano-Global Deployment Guide
 
 ![architecture_diagram.svg](../imgs/architecture_diagram.svg)
 
-`Volcano-global` is deployed on the basis of `Karmada`. After deploying
-`Karmada`, you need to deploy [`Volcano`](https://github.com/volcano-sh/volcano)
-on the worker cluster and deploy three components of `Volcano-global` in the `Karmada control plane`.
+Volcano-global runs on [Karmada](https://karmada.io/) with [Volcano](https://github.com/volcano-sh/volcano) on member clusters.
 
-This installation document will provide examples based on deploying `Karmada` using `./hack/local-up-karmada.sh`.
-You can modify the deployment method according to different environments.
+## Installation Methods
 
-# Deploy Steps
+| Method | Best For |
+|--------|----------|
+| [Helm](#helm-installation) | Production, automated deployments |
+| [Manual](#manual-installation) | Learning, custom configurations |
+
+---
+
+# Helm Installation
+
+## Prerequisites
+
+Complete these steps first:
+1. [Deploy Karmada](#1-deploy-the-karmada) (v1.13.0-beta.0+)
+2. [Deploy Volcano to member clusters](#2-deploy-the-volcano-to-member-clusters) (v1.10.0+)
+3. [Deploy Kubernetes Reflector](#3-deploy-the-kubernetes-reflector-to-share-the-karmadas-kubeconfig-secret-to-volcano-global-namespace)
+4. [Apply Volcano CRDs](#4-apply-the-required-crd-at-karmada-control-plane)
+
+## Quick Install
+
+```bash
+export KUBECONFIG=$HOME/.kube/karmada.config
+
+# Install to karmada-host
+helm install volcano-global ./installer/helm/chart/volcano-global \
+  --namespace volcano-global --create-namespace --kube-context karmada-host
+
+# Apply resources to karmada-apiserver
+for tpl in webhooks resource-interpreters propagation-policy; do
+  helm template volcano-global ./installer/helm/chart/volcano-global \
+    --show-only templates/${tpl}.yaml | kubectl --context karmada-apiserver apply -f -
+done
+
+# Protect the propagation policy
+kubectl --context karmada-apiserver label clusterpropagationpolicy \
+  volcano-global-all-queue-propagation resourcetemplate.karmada.io/deletion-protected=Always
+```
+
+## Configuration
+
+Key parameters (see `values.yaml` for full list):
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `controllerManager.controllers` | `dispatcher` | Add `reconciler` for HyperJob support |
+| `controllerManager.reconcilers` | `""` | Set to `hyperjob` to enable HyperJob |
+| `controllerManager.leaderElect` | `false` | Enable for HA deployments |
+| `webhookManager.enabledAdmissions` | `/resourcebindings/mutate,/jobs/mutate,/jobs/validate` | Webhook endpoints |
+| `datasourcePlugins.enabled` | `false` | Enable for DataDependency features |
+
+### Enable HyperJob
+
+```bash
+helm install volcano-global ./installer/helm/chart/volcano-global \
+  --set controllerManager.controllers="dispatcher,reconciler" \
+  --set controllerManager.reconcilers="hyperjob" \
+  --namespace volcano-global --create-namespace --kube-context karmada-host
+```
+
+### Enable DataDependency
+
+```bash
+# Apply DataSource CRDs first
+kubectl --context karmada-apiserver apply -f docs/deploy/crds/
+
+helm install volcano-global ./installer/helm/chart/volcano-global \
+  --set controllerManager.controllers="dispatcher,datadependency-controller" \
+  --set controllerManager.featureGates.DataDependencyAwareness=true \
+  --set datasourcePlugins.enabled=true \
+  --namespace volcano-global --create-namespace --kube-context karmada-host
+```
+
+## Upgrade / Uninstall
+
+```bash
+# Upgrade
+helm upgrade volcano-global ./installer/helm/chart/volcano-global \
+  --namespace volcano-global --kube-context karmada-host
+
+# Uninstall
+helm uninstall volcano-global --namespace volcano-global --kube-context karmada-host
+```
+
+---
+
+# Manual Installation
+
+The following steps guide you through deploying volcano-global manually using kubectl.
+
+## Deploy Steps
 
 ## 1. Deploy the Karmada
 
@@ -169,4 +252,33 @@ mindspore-cpu-pod-4   1/1     Running   0          2m24s
 mindspore-cpu-pod-5   1/1     Running   0          2m24s
 mindspore-cpu-pod-6   1/1     Running   0          2m24s
 mindspore-cpu-pod-7   1/1     Running   0          2m24s
+```
+
+---
+
+# Troubleshooting
+
+### Check Pod Status
+
+```bash
+kubectl get pods -n volcano-global --context karmada-host
+```
+
+### Check Controller Manager Logs
+
+```bash
+kubectl logs -n volcano-global -l app=volcano-global-controller-manager --context karmada-host
+```
+
+### Check Webhook Manager Logs
+
+```bash
+kubectl logs -n volcano-global -l app=volcano-global-webhook-manager --context karmada-host
+```
+
+### Check Admission Init Job (Helm only)
+
+```bash
+kubectl get jobs -n volcano-global --context karmada-host
+kubectl logs -n volcano-global -l app=volcano-global-admission-init --context karmada-host
 ```

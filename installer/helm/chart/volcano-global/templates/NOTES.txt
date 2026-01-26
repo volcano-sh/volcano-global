@@ -1,0 +1,33 @@
+Thank you for installing {{ .Chart.Name }}!
+
+=== Deployment Status ===
+{{- if .Values.controllerManager.enabled }}
+✓ Controller Manager: Enabled (controllers: {{ .Values.controllerManager.controllers }})
+{{- end }}
+{{- if .Values.webhookManager.enabled }}
+✓ Webhook Manager: Enabled
+{{- if .Values.webhookManager.admissionInit.enabled }}
+  → Admission init job will generate TLS certificates
+{{- end }}
+{{- end }}
+
+=== Post-Installation Steps ===
+Apply these resources to karmada-apiserver (not karmada-host):
+
+  # Apply webhooks
+  helm template {{ .Release.Name }} ./installer/helm/chart/volcano-global \
+    --show-only templates/webhooks.yaml | kubectl --context karmada-apiserver apply -f -
+
+  # Apply resource interpreters
+  helm template {{ .Release.Name }} ./installer/helm/chart/volcano-global \
+    --show-only templates/resource-interpreters.yaml | kubectl --context karmada-apiserver apply -f -
+
+  # Apply propagation policy
+  helm template {{ .Release.Name }} ./installer/helm/chart/volcano-global \
+    --show-only templates/propagation-policy.yaml | kubectl --context karmada-apiserver apply -f -
+
+=== Verify Installation ===
+  kubectl get pods -n {{ include "volcano-global.namespace" . }} --context karmada-host
+  kubectl get deployments -n {{ include "volcano-global.namespace" . }} --context karmada-host
+
+For more information: https://github.com/volcano-sh/volcano-global

@@ -1,0 +1,20 @@
+{{- if .Values.propagationPolicies.enabled }}
+{{- if .Values.propagationPolicies.allQueue.enabled }}
+apiVersion: policy.karmada.io/v1alpha1
+kind: ClusterPropagationPolicy
+metadata:
+  name: volcano-global-all-queue-propagation
+  labels:
+    {{- include "volcano-global.labels" . | nindent 4 }}
+    {{- if .Values.propagationPolicies.allQueue.deletionProtected }}
+    resourcetemplate.karmada.io/deletion-protected: Always
+    {{- end }}
+spec:
+  resourceSelectors:
+    - apiVersion: scheduling.volcano.sh/v1beta1
+      kind: Queue
+  placement:
+    replicaScheduling:
+      replicaSchedulingType: Duplicated
+{{- end }}
+{{- end }}

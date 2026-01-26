@@ -1,0 +1,234 @@
+{{- if .Values.resourceInterpreters.enabled }}
+{{- if .Values.resourceInterpreters.vcjob.enabled }}
+apiVersion: config.karmada.io/v1alpha1
+kind: ResourceInterpreterCustomization
+metadata:
+  name: vcjob-configuration
+  labels:
+    {{- include "volcano-global.labels" . | nindent 4 }}
+spec:
+  target:
+    apiVersion: batch.volcano.sh/v1alpha1
+    kind: Job
+  customizations:
+    replicaResource:
+      luaScript: >
+        local kube = require("kube")
+        function GetReplicas(obj)
+          replica = obj.spec.tasks[1].replicas
+          requirement = kube.accuratePodRequirements(obj.spec.tasks[1].template)
+          return replica, requirement
+        end
+    replicaRevision:
+      luaScript: >
+        function ReviseReplica(obj, desiredReplica)
+          obj.spec.tasks[1].replicas = desiredReplica
+          return obj
+        end
+    retention:
+      luaScript: >
+        function Retain(desiredObj, observedObj)
+          for i = 1, #observedObj.spec.tasks do
+            desiredObj.spec.tasks[i].maxRetry = observedObj.spec.tasks[i].maxRetry
+            desiredObj.spec.tasks[i].minAvailable = observedObj.spec.tasks[i].minAvailable
+          end
+          return desiredObj
+        end
+    healthInterpretation:
+      luaScript: >
+        function InterpretHealth(observedObj)
+          if observedObj == nil or observedObj.status == nil then
+            return false
+          end
+          return observedObj.status.phase == Running
+        end
+    statusReflection:
+      luaScript: >
+        function ReflectStatus (observedObj)
+          status = {}
+          if observedObj == nil or observedObj.status == nil then
+            return status
+          end
+          status.minAvailable = observedObj.status.minAvailable
+          status.running = observedObj.status.running
+          status.taskStatusCount = observedObj.status.taskStatusCount
+          status.state = observedObj.status.state
+          return status
+        end
+    statusAggregation:
+      luaScript: >
+        function AggregateStatus(desiredObj, statusItems)
+          if statusItems == nil then
+            return desiredObj
+          end
+          if desiredObj.status == nil then
+            desiredObj.status = {}
+          end
+          running = 0
+          minAvailable = 0
+          taskStatusCount = {}
+          state = {}
+          for i = 1, #statusItems do
+            if statusItems[i].status ~= nil and statusItems[i].status.running ~= nil then
+              running = running + statusItems[i].status.running
+            end
+            if statusItems[i].status ~= nil and statusItems[i].status.minAvailable ~= nil then
+              minAvailable = statusItems[i].status.minAvailable
+            end
+            if statusItems[i].status ~= nil and statusItems[i].status.state ~= nil then
+              state = statusItems[i].status.state
+            end
+            if statusItems[i].status ~= nil and statusItems[i].status.taskStatusCount ~= nil then
+              for key, value in pairs(statusItems[i].status.taskStatusCount) do
+                if taskStatusCount[key] == nil then
+                   taskStatusCount[key] = { phase = {} }
+                end
+                for k,v in pairs(value.phase) do
+                  if taskStatusCount[key].phase[k] == nil then
+                    taskStatusCount[key].phase[k] = 0
+                  end    
+                  taskStatusCount[key].phase[k] =  taskStatusCount[key].phase[k] + v
+                end
+              end
+            end
+          end
+          desiredObj.status.running = running
+          desiredObj.status.minAvailable = minAvailable
+          desiredObj.status.state = state
+          desiredObj.status.taskStatusCount = taskStatusCount
+          return desiredObj
+        end
+{{- end }}
+---
+{{- if .Values.resourceInterpreters.queue.enabled }}
+apiVersion: config.karmada.io/v1alpha1
+kind: ResourceInterpreterCustomization
+metadata:
+  name: queue-configuration
+  labels:
+    {{- include "volcano-global.labels" . | nindent 4 }}
+spec:
+  target:
+    apiVersion: scheduling.volcano.sh/v1beta1
+    kind: Queue
+  customizations:
+    statusReflection:
+      luaScript: >
+        function ReflectStatus (observedObj)
+          return observedObj.status
+        end
+    statusAggregation:
+      luaScript: >
+        function AggregateStatus(desiredObj, statusItems)
+          if statusItems == nil then
+            return desiredObj
+          end
+
+          if desiredObj.status == nil then
+            desiredObj.status = {}
+          end
+
+          local aggregatedStatus = {
+            allocated = {},
+            reservation = {},
+            running = 0,
+            state = ""
+          }
+
+          local function parseCpu(cpuStr)
+            if string.find(cpuStr, "m") then
+              return tonumber(string.match(cpuStr, "%d+")) / 1000
+            else
+              return tonumber(cpuStr)
+            end
+          end
+
+          local function formatCpu(cpuNum)
+            if cpuNum == math.floor(cpuNum) then
+              return tostring(cpuNum)
+            else
+              return tostring(cpuNum * 1000) .. "m"
+            end
+          end
+
+          local function parseMemory(memoryStr)
+            if string.find(memoryStr, "Gi") then
+              return tonumber(string.match(memoryStr, "%d+")) * 1024
+            elseif string.find(memoryStr, "G") then
+              return tonumber(string.match(memoryStr, "%d+")) * 1000
+            elseif string.find(memoryStr, "Mi") or string.find(memoryStr, "M") then
+              return tonumber(string.match(memoryStr, "%d+"))
+            elseif string.find(memoryStr, "Ki") then
+              return tonumber(string.match(memoryStr, "%d+")) / 1024
+            else
+              return tonumber(memoryStr) / (1024 * 1024)
+            end
+          end
+
+          local function formatMemory(memoryNum)
+            if memoryNum >= 1024 then
+              return tostring(memoryNum / 1024) .. "Gi"
+            else
+              return tostring(memoryNum) .. "Mi"
+            end
+          end
+
+          local function isNumericField(value)
+            if type(value) == "number" then
+              return true
+            elseif type(value) == "string" then
+              return tonumber(value) ~= nil
+            end
+            return false
+          end
+
+          local function aggregateState(states)
+            local result = "Open"
+  
+            for _, state in ipairs(states) do
+              if state == "Closed" then
+                result = "Closed"
+                break
+              end
+            end
+            return result
+          end
+        
+          local states = {}
+          for i = 1, #statusItems do
+            local status = statusItems[i].status
+            if status ~= nil and status.allocated ~= nil then
+              for key, value in pairs(status.allocated) do
+                if aggregatedStatus.allocated[key] == nil then
+                  aggregatedStatus.allocated[key] = value
+                else
+                  if key == "cpu" then
+                    local currentCpu = parseCpu(aggregatedStatus.allocated[key])
+                    local newCpu = parseCpu(value)
+                    aggregatedStatus.allocated[key] = formatCpu(currentCpu + newCpu)
+                  elseif key == "memory" then
+                    local currentMemory = parseMemory(aggregatedStatus.allocated[key])
+                    local newMemory = parseMemory(value)
+                    aggregatedStatus.allocated[key] = formatMemory(currentMemory + newMemory)
+                  elseif isNumericField(value) then  
+                    local currentValue = tonumber(aggregatedStatus.allocated[key])
+                    local newValue = tonumber(value)
+                    if currentValue ~= nil and newValue ~= nil then
+                      aggregatedStatus.allocated[key] = tostring(currentValue + newValue)
+                    end
+                  end
+                end
+              end
+
+              if status.running ~= nil then
+                aggregatedStatus.running = aggregatedStatus.running + status.running
+              end
+            end
+          end
+
+          aggregatedStatus.state = aggregateState(states)
+          desiredObj.status = aggregatedStatus
+          return desiredObj
+        end
+{{- end }}
+{{- end }}
