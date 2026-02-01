@@ -22,9 +22,6 @@ import (
 	clusterv1alpha1 "github.com/karmada-io/karmada/pkg/apis/cluster/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
-
-// GetClusterCondition returns the condition with the specified type from cluster status.
-// Returns nil if the condition is not found.
 func GetClusterCondition(cluster *clusterv1alpha1.Cluster, conditionType clusterv1alpha1.ClusterConditionType) *metav1.Condition {
 	for i := range cluster.Status.Conditions {
 		if cluster.Status.Conditions[i].Type == string(conditionType) {
@@ -34,15 +31,11 @@ func GetClusterCondition(cluster *clusterv1alpha1.Cluster, conditionType cluster
 	return nil
 }
 
-// IsClusterReady returns true if the cluster is in Ready condition with status True.
-// This is a convenience function for simple boolean checks where error messages are not needed.
 func IsClusterReady(cluster *clusterv1alpha1.Cluster) bool {
 	condition := GetClusterCondition(cluster, clusterv1alpha1.ClusterConditionReady)
 	return condition != nil && condition.Status == metav1.ConditionTrue
 }
 
-// CheckClusterReady checks if the cluster is ready and returns a detailed message if not.
-// Returns (true, "") if the cluster is ready, or (false, message) with details if not ready.
 func CheckClusterReady(cluster *clusterv1alpha1.Cluster) (bool, string) {
 	condition := GetClusterCondition(cluster, clusterv1alpha1.ClusterConditionReady)
 	if condition == nil {
