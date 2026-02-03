@@ -37,7 +37,7 @@ func TestGetClusterCondition(t *testing.T) {
 			cluster: &clusterv1alpha1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
 				Status: clusterv1alpha1.ClusterStatus{
-					Conditions: []metav1.Condition{{Type: string(readyType), Status: metav1.ConditionTrue}},
+					Conditions: []metav1.Condition{{Type: readyType, Status: metav1.ConditionTrue}},
 				},
 			},
 			condType: readyType, wantNil: false, wantStatus: metav1.ConditionTrue,
@@ -47,7 +47,7 @@ func TestGetClusterCondition(t *testing.T) {
 			cluster: &clusterv1alpha1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
 				Status: clusterv1alpha1.ClusterStatus{
-					Conditions: []metav1.Condition{{Type: string(readyType), Status: metav1.ConditionFalse}},
+					Conditions: []metav1.Condition{{Type: readyType, Status: metav1.ConditionFalse}},
 				},
 			},
 			condType: readyType, wantNil: false, wantStatus: metav1.ConditionFalse,
@@ -89,7 +89,7 @@ func TestIsClusterReady(t *testing.T) {
 			cluster: &clusterv1alpha1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{Name: "ready-cluster"},
 				Status: clusterv1alpha1.ClusterStatus{
-					Conditions: []metav1.Condition{{Type: string(readyType), Status: metav1.ConditionTrue}},
+					Conditions: []metav1.Condition{{Type: readyType, Status: metav1.ConditionTrue}},
 				},
 			},
 			want: true,
@@ -99,7 +99,7 @@ func TestIsClusterReady(t *testing.T) {
 			cluster: &clusterv1alpha1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{Name: "not-ready-cluster"},
 				Status: clusterv1alpha1.ClusterStatus{
-					Conditions: []metav1.Condition{{Type: string(readyType), Status: metav1.ConditionFalse}},
+					Conditions: []metav1.Condition{{Type: readyType, Status: metav1.ConditionFalse}},
 				},
 			},
 			want: false,
@@ -133,7 +133,7 @@ func TestCheckClusterReady(t *testing.T) {
 			cluster: &clusterv1alpha1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{Name: "ready-cluster"},
 				Status: clusterv1alpha1.ClusterStatus{
-					Conditions: []metav1.Condition{{Type: string(readyType), Status: metav1.ConditionTrue}},
+					Conditions: []metav1.Condition{{Type: readyType, Status: metav1.ConditionTrue}},
 				},
 			},
 			ready: true, message: "",
@@ -144,7 +144,7 @@ func TestCheckClusterReady(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Name: "not-ready-cluster"},
 				Status: clusterv1alpha1.ClusterStatus{
 					Conditions: []metav1.Condition{
-						{Type: string(readyType), Status: metav1.ConditionFalse, Reason: "NetworkUnavailable", Message: "Network is down"},
+						{Type: readyType, Status: metav1.ConditionFalse, Reason: "NetworkUnavailable", Message: "Network is down"},
 					},
 				},
 			},

@@ -24,7 +24,7 @@ import (
 )
 func GetClusterCondition(cluster *clusterv1alpha1.Cluster, conditionType clusterv1alpha1.ClusterConditionType) *metav1.Condition {
 	for i := range cluster.Status.Conditions {
-		if cluster.Status.Conditions[i].Type == string(conditionType) {
+		if cluster.Status.Conditions[i].Type == conditionType {
 			return &cluster.Status.Conditions[i]
 		}
 	}
