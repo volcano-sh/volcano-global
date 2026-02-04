@@ -23,15 +23,31 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func CheckClusterReady(cluster *clusterv1alpha1.Cluster) (bool, string) {
-	for _, condition := range cluster.Status.Conditions {
-		if condition.Type == clusterv1alpha1.ClusterConditionReady {
-			if condition.Status == metav1.ConditionTrue {
-				return true, ""
-			} else {
-				return false, fmt.Sprintf("Cluster <%s> is not ready, reason: %s, message: %s", cluster.Name, condition.Reason, condition.Message)
-			}
+// GetClusterCondition returns the condition with the specified type from cluster status.
+// Returns nil if the condition is not found.
+func GetClusterCondition(cluster *clusterv1alpha1.Cluster, conditionType clusterv1alpha1.ClusterConditionType) *metav1.Condition {
+	for i := range cluster.Status.Conditions {
+		if cluster.Status.Conditions[i].Type == string(conditionType) {
+			return &cluster.Status.Conditions[i]
 		}
 	}
-	return false, fmt.Sprintf("Cluster<%s> has not %s Condition", cluster.Name, clusterv1alpha1.ClusterConditionReady)
+	return nil
+}
+
+// IsClusterReady returns true if the cluster is in Ready condition with status True.
+func IsClusterReady(cluster *clusterv1alpha1.Cluster) bool {
+	condition := GetClusterCondition(cluster, clusterv1alpha1.ClusterConditionReady)
+	return condition != nil && condition.Status == metav1.ConditionTrue
+}
+
+// CheckClusterReady checks if the cluster is ready and returns a detailed message if not.
+func CheckClusterReady(cluster *clusterv1alpha1.Cluster) (bool, string) {
+	condition := GetClusterCondition(cluster, clusterv1alpha1.ClusterConditionReady)
+	if condition == nil {
+		return false, fmt.Sprintf("Cluster<%s> has not %s Condition", cluster.Name, clusterv1alpha1.ClusterConditionReady)
+	}
+	if condition.Status == metav1.ConditionTrue {
+		return true, ""
+	}
+	return false, fmt.Sprintf("Cluster<%s> is not ready, reason: %s, message: %s", cluster.Name, condition.Reason, condition.Message)
 }

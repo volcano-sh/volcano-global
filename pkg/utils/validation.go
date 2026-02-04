@@ -20,7 +20,13 @@ import (
 	"fmt"
 
 	clusterv1alpha1 "github.com/karmada-io/karmada/pkg/apis/cluster/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	// ClusterUnschedulableTaintKey is the taint key that prevents scheduling to a cluster.
+	ClusterUnschedulableTaintKey = "cluster.karmada.io/unschedulable"
 )
 
 // ValidateClusterCapacity checks if a cluster has sufficient capacity for workload.
@@ -32,6 +38,22 @@ func ValidateClusterCapacity(cluster *clusterv1alpha1.Cluster, requiredResources
 
 	if cluster.Status.Allocatable == nil {
 		return false, fmt.Sprintf("cluster %s has no allocatable resources", cluster.Name)
+	}
+
+	// Compare required resources against allocatable
+	for name, reqStr := range requiredResources {
+		reqQty, err := resource.ParseQuantity(reqStr)
+		if err != nil {
+			return false, fmt.Sprintf("invalid required resource %s: %v", reqStr, err)
+		}
+
+		if allocQty, ok := cluster.Status.Allocatable[metav1.ResourceName(name)]; ok {
+			if allocQty.Cmp(reqQty) < 0 {
+				return false, fmt.Sprintf("insufficient %s: required %s, allocatable %s", name, reqStr, allocQty.String())
+			}
+		} else {
+			return false, fmt.Sprintf("resource %s not reported by cluster", name)
+		}
 	}
 
 	if ready, msg := CheckClusterReady(cluster); !ready {
@@ -50,7 +72,7 @@ func IsClusterSchedulable(cluster *clusterv1alpha1.Cluster) bool {
 
 	if cluster.Spec.Taints != nil {
 		for _, taint := range cluster.Spec.Taints {
-			if taint.Key == "node.kubernetes.io/unschedulable" {
+			if taint.Key == ClusterUnschedulableTaintKey {
 				return false
 			}
 		}
@@ -59,7 +81,7 @@ func IsClusterSchedulable(cluster *clusterv1alpha1.Cluster) bool {
 	return IsClusterReady(cluster)
 }
 
-// GetClusterScheduleScore calculates a scheduling score for a cluster based on resource utilization.
+// GetClusterScheduleScore calculates a scheduling score for a cluster based on its characteristics.
 // Higher score = more suitable for scheduling. Range: 0-100.
 func GetClusterScheduleScore(cluster *clusterv1alpha1.Cluster) int {
 	if cluster == nil || !IsClusterSchedulable(cluster) {
