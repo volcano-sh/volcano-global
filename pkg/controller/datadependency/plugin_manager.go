@@ -483,7 +483,14 @@ func (pm *PluginManager) updateSingleDataSource(ctx context.Context, ds *v1alpha
     }
 
 	// Update DataSource spec if clusters have changed
-	if !pm.clustersEqual(ds.Spec.Locality.ClusterNames, clusters) {
+	var currentClusters []string
+	if ds.Spec.Locality != nil {
+		currentClusters = ds.Spec.Locality.ClusterNames
+	}
+	if !pm.clustersEqual(currentClusters, clusters) {
+		if ds.Spec.Locality == nil {
+			ds.Spec.Locality = &v1alpha1.DataSourceLocality{}
+		}
 		ds.Spec.Locality.ClusterNames = clusters
 
 		_, err := pm.datadependencyClient.DatadependencyV1alpha1().DataSources().Update(ctx, ds, metav1.UpdateOptions{})
