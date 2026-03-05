@@ -1,0 +1,44 @@
+# Case 3: Training with Cluster Affinity
+#
+# A team runs a fault-tolerant training job across three clusters with a minimum
+# availability requirement. The job uses clusterNames to pin each replica to a
+# specific cluster, while minAvailable allows the HyperJob to continue even if
+# one replica fails.
+#
+# The controller creates three VCJobs (resilient-training-trainer-0, resilient-training-trainer-1,
+# resilient-training-trainer-2), each scheduled to their respective preferred cluster.
+# The HyperJob is considered healthy as long as at least 2 out of 3 jobs are running.
+apiVersion: training.volcano.sh/v1alpha1
+kind: HyperJob
+metadata:
+  name: resilient-training
+  namespace: default
+spec:
+  minAvailable: 2
+  replicatedJobs:
+  - name: trainer
+    replicas: 3
+    clusterNames:
+    - cluster-gpu-west-1
+    - cluster-gpu-east-1
+    - cluster-gpu-central-1
+    templateSpec:
+      minAvailable: 1
+      schedulerName: volcano
+      policies:
+      - event: PodEvicted
+        action: RestartJob
+      tasks:
+      - name: worker
+        replicas: 32
+        template:
+          spec:
+            containers:
+            - name: trainer
+              image: training-image:v1
+              resources:
+                requests:
+                  nvidia.com/gpu: "1"
+                limits:
+                  nvidia.com/gpu: "1"
+            restartPolicy: OnFailure

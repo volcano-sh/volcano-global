@@ -1,0 +1,78 @@
+# Case 2: Heterogeneous Clusters Training
+#
+# An organization has multiple clusters with different generations of Ascend NPU
+# accelerators (910B and 910C). This HyperJob splits the workload across these
+# heterogeneous clusters, with each ReplicatedJob targeting specific hardware.
+#
+# The controller creates:
+#   - llm-heterogeneous-trainer-910b-0 (VCJob + PropagationPolicy) → cluster-ascend-910b-1 or cluster-ascend-910b-2
+#   - llm-heterogeneous-trainer-910c-0 (VCJob + PropagationPolicy) → cluster-ascend-910c-1
+apiVersion: training.volcano.sh/v1alpha1
+kind: HyperJob
+metadata:
+  name: llm-heterogeneous
+  namespace: default
+spec:
+  minAvailable: 2
+  replicatedJobs:
+  - name: trainer-910b
+    replicas: 1
+    clusterNames:
+    - cluster-ascend-910b-1
+    - cluster-ascend-910b-2
+    templateSpec:
+      minAvailable: 1
+      schedulerName: volcano
+      tasks:
+      - name: worker
+        replicas: 64
+        template:
+          spec:
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: hardware-type
+                      operator: In
+                      values:
+                      - Ascend910B
+            containers:
+            - name: trainer
+              image: training-image:v1
+              resources:
+                requests:
+                  huawei.com/ascend910b: "1"
+                limits:
+                  huawei.com/ascend910b: "1"
+            restartPolicy: OnFailure
+  - name: trainer-910c
+    replicas: 1
+    clusterNames:
+    - cluster-ascend-910c-1
+    templateSpec:
+      minAvailable: 1
+      schedulerName: volcano
+      tasks:
+      - name: worker
+        replicas: 64
+        template:
+          spec:
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: hardware-type
+                      operator: In
+                      values:
+                      - Ascend910C
+            containers:
+            - name: trainer
+              image: training-image:v1
+              resources:
+                requests:
+                  huawei.com/ascend910c: "1"
+                limits:
+                  huawei.com/ascend910c: "1"
+            restartPolicy: OnFailure
