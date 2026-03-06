@@ -1,0 +1,35 @@
+# Case 1: Large-scale Training Job Splitting
+#
+# A research team wants to train a large language model that requires 256 GPUs,
+# but their largest cluster only has 128 GPUs. Using HyperJob, the training job
+# is split into two sub-jobs, each with 128 GPUs, running across two clusters.
+#
+# The controller creates two VCJobs (llm-training-trainer-0, llm-training-trainer-1)
+# with a PropagationPolicy for each, distributing them across available clusters.
+apiVersion: training.volcano.sh/v1alpha1
+kind: HyperJob
+metadata:
+  name: llm-training
+  namespace: default
+spec:
+  minAvailable: 2
+  replicatedJobs:
+  - name: trainer
+    replicas: 2
+    templateSpec:
+      minAvailable: 1
+      schedulerName: volcano
+      tasks:
+      - name: worker
+        replicas: 128
+        template:
+          spec:
+            containers:
+            - name: trainer
+              image: training-image:v1
+              resources:
+                requests:
+                  nvidia.com/gpu: "1"
+                limits:
+                  nvidia.com/gpu: "1"
+            restartPolicy: OnFailure
