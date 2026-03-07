@@ -482,6 +482,11 @@ func (pm *PluginManager) updateSingleDataSource(ctx context.Context, ds *v1alpha
         return
     }
 
+	// Ensure Locality is initialized before accessing ClusterNames
+	if ds.Spec.Locality == nil {
+		ds.Spec.Locality = &v1alpha1.DataSourceLocality{}
+	}
+
 	// Update DataSource spec if clusters have changed
 	if !pm.clustersEqual(ds.Spec.Locality.ClusterNames, clusters) {
 		ds.Spec.Locality.ClusterNames = clusters
