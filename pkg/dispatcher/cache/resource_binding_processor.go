@@ -54,11 +54,17 @@ func (dc *DispatcherCache) unSuspendResourceBindingTaskWorker() {
 
 		dc.mutex.Lock()
 		key := obj.(types.NamespacedName)
-		rbi, ok := dc.resourceBindingInfos[key.Namespace][key.Name]
+		nsMap := dc.resourceBindingInfos[key.Namespace]
+		var rbi *api.ResourceBindingInfo
+		var ok bool
+		if nsMap != nil {
+			rbi, ok = nsMap[key.Name]
+		}
 		if !ok {
-			klog.Errorf("ResourceBindingInfo <%s/%s> not found in cache.", key.Namespace, key.Name)
+			klog.Errorf("ResourceBindingInfo <%s/%s> not found in cache, releasing workqueue item.", key.Namespace, key.Name)
 			dc.mutex.Unlock()
-			break
+			dc.unSuspendRBTaskQueue.Done(obj)
+			continue
 		}
 		dc.mutex.Unlock()
 
