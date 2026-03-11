@@ -18,12 +18,14 @@ package utils
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	batchv1alpha1 "volcano.sh/apis/pkg/apis/batch/v1alpha1"
-	schedulingv1beta1 "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
 )
 
-const defaultQueue = "default"
+const (
+	QueueNameKey = "volcano.sh/queue-name"
+	QueueNameAnnotationKey = "scheduling.volcano.sh/queue-name"
 
+	defaultQueue = "default"
+)
 // GetObjQueue returns the queue name of an obj.
 // There are 3 ways to get queue name for now:
 // scheduling.volcano.sh/queue-name support only annotation
@@ -31,15 +33,27 @@ const defaultQueue = "default"
 // the key should be unified, maybe volcano.sh/queue-name is better
 func GetObjQueue(obj metav1.Object) string {
 	labels := obj.GetLabels()
-	if _, ok := labels[batchv1alpha1.QueueNameKey]; ok {
-		return labels[batchv1alpha1.QueueNameKey]
+	if q, ok := labels[QueueNameKey]; ok {
+		return q
 	}
+
 	annotations := obj.GetAnnotations()
-	if _, ok := annotations[batchv1alpha1.QueueNameKey]; ok {
-		return annotations[batchv1alpha1.QueueNameKey]
+	if q, ok := annotations[QueueNameKey]; ok {
+		return q
 	}
-	if _, ok := annotations[schedulingv1beta1.QueueNameAnnotationKey]; ok {
-		return annotations[schedulingv1beta1.QueueNameAnnotationKey]
+
+	if q, ok := annotations[QueueNameAnnotationKey]; ok {
+		return q
 	}
+
 	return defaultQueue
+}
+
+func SetObjQueue(obj metav1.Object, queue string) {
+	labels := obj.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	labels[QueueNameKey] = queue
+	obj.SetLabels(labels)
 }
