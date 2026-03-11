@@ -57,6 +57,10 @@ func (dc *DispatcherCache) Snapshot() *DispatcherCacheSnapshot {
 	}
 
 	for _, cluster := range dc.clusters {
+		if cluster.Status.ResourceSummary == nil {
+			klog.V(5).Infof("Cluster <%s> has nil ResourceSummary, skipping resource aggregation.", cluster.Name)
+			continue
+		}
 		snapshot.TotalResource.Add(schedulingapi.NewResource(cluster.Status.ResourceSummary.Allocatable))
 	}
 

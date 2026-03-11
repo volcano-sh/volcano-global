@@ -304,6 +304,16 @@ func (dc *DispatcherCache) updateCluster(oldObj, newObj interface{}) {
 	dc.mutex.Lock()
 	defer dc.mutex.Unlock()
 
+	if ready, message := utils.CheckClusterReady(newCluster); !ready {
+		klog.V(5).Info(message)
+		delete(dc.clusters, newCluster.Name)
+		return
+	}
+	if newCluster.Status.ResourceSummary == nil {
+		klog.V(5).Infof("Cluster <%s> has nil ResourceSummary, removing it from cache.", newCluster.Name)
+		delete(dc.clusters, newCluster.Name)
+		return
+	}
 	dc.setCluster(newCluster)
 }
 
