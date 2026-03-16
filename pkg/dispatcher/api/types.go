@@ -17,7 +17,19 @@ limitations under the License.
 package api
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	volcanoapi "volcano.sh/volcano/pkg/scheduler/api"
 )
 
+const (
+	// LastDispatchedContentAnnotationKey is last dispatched content key in annotations of ResourceBinding, value is DispatchContent.
+	LastDispatchedContentAnnotationKey = "volcano-global.volcano.sh/last-dispatched-content"
+)
+
 type AllocatableFn func(qi *volcanoapi.QueueInfo, rbi *ResourceBindingInfo) bool
+
+// DispatchContent includes Replicas and ResourceRequest of the ResourceBinding, it needs to be set in ResourceBinding annotation.
+type DispatchContent struct {
+	Replicas        int32               `json:"replicas"`
+	ResourceRequest corev1.ResourceList `json:"resourceRequest"`
+}
