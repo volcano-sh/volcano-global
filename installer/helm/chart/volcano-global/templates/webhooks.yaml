@@ -1,0 +1,94 @@
+{{- /*
+  NOTE: These webhook configurations need to be applied to karmada-apiserver,
+  not to the karmada-host cluster where other resources are deployed.
+  They are excluded from helm chart and should be applied separately using:
+  kubectl --context karmada-apiserver apply -f docs/deploy/volcano-global-webhooks.yaml
+*/}}
+{{- if false }}
+{{- /* Disabled: webhooks must be applied to karmada-apiserver, not karmada-host */}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: volcano-admission-service-resourcebindings-mutate
+  {{- if .Values.custom.common_labels }}
+  labels:
+    {{- toYaml .Values.custom.common_labels | nindent 4 }}
+  {{- end }}
+webhooks:
+  - name: mutateresourcebindings.volcano.sh
+    admissionReviewVersions:
+      - v1
+    clientConfig:
+      url: https://{{ .Values.basic.webhook_service_name }}.{{ .Release.Namespace }}.svc:443/resourcebindings/mutate
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    reinvocationPolicy: Never
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: ["work.karmada.io"]
+        apiVersions: ["v1alpha2"]
+        resources: ["resourcebindings"]
+        scope: "Namespaced"
+    sideEffects: None
+    timeoutSeconds: 3
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: volcano-admission-service-jobs-mutate
+  {{- if .Values.custom.common_labels }}
+  labels:
+    {{- toYaml .Values.custom.common_labels | nindent 4 }}
+  {{- end }}
+webhooks:
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      url: https://{{ .Values.basic.webhook_service_name }}.{{ .Release.Namespace }}.svc:443/jobs/mutate
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    name: mutatejob.volcano.sh
+    reinvocationPolicy: Never
+    rules:
+      - apiGroups:
+          - batch.volcano.sh
+        apiVersions:
+          - v1alpha1
+        operations:
+          - CREATE
+        resources:
+          - jobs
+        scope: Namespaced
+    sideEffects: NoneOnDryRun
+    timeoutSeconds: 10
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: volcano-admission-service-jobs-validate
+  {{- if .Values.custom.common_labels }}
+  labels:
+    {{- toYaml .Values.custom.common_labels | nindent 4 }}
+  {{- end }}
+webhooks:
+  - admissionReviewVersions:
+      - v1
+    clientConfig:
+      url: https://{{ .Values.basic.webhook_service_name }}.{{ .Release.Namespace }}.svc:443/jobs/validate
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    name: validatejob.volcano.sh
+    rules:
+      - apiGroups:
+          - batch.volcano.sh
+        apiVersions:
+          - v1alpha1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - jobs
+        scope: Namespaced
+    sideEffects: NoneOnDryRun
+    timeoutSeconds: 10
+{{- end }}
