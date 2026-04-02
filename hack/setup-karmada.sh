@@ -47,6 +47,9 @@ echo "Running Karmada local-up script..."
 # Verify the environment came up
 echo "Verifying Karmada API server..."
 export KUBECONFIG="${HOME}/.kube/karmada.config"
+kubectl config get-contexts karmada-host >/dev/null
+kubectl --context karmada-host get ns default >/dev/null
+echo "Karmada host cluster is healthy."
 kubectl --context karmada-apiserver get ns default >/dev/null
 echo "Karmada API server is healthy."
 
