@@ -35,7 +35,7 @@ if [ -d "${KARMADA_DIR}" ]; then
 fi
 
 echo "Cloning Karmada repository..."
-git clone "${KARMADA_REPO}" "${KARMADA_DIR}"
+git clone --depth 1 "${KARMADA_REPO}" "${KARMADA_DIR}"
 
 # Step 2: cd into it
 cd "${KARMADA_DIR}"
