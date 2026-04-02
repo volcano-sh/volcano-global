@@ -52,7 +52,8 @@ echo "Karmada API server is healthy."
 
 echo "Verifying member clusters..."
 export KUBECONFIG="${HOME}/.kube/members.config"
-for cluster in member1 member2 member3; do
+MEMBER_CLUSTERS=${MEMBER_CLUSTERS:-"member1 member2 member3"}
+for cluster in ${MEMBER_CLUSTERS}; do
     kubectl --context "${cluster}" get ns default >/dev/null
     echo "  ${cluster} is ready."
 done
