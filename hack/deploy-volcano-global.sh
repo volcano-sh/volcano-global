@@ -48,6 +48,31 @@ ensure_exists() {
     fi
 }
 
+kind_load_image() {
+    local image="$1"
+    local cluster_name="$2"
+
+    if ! kind get clusters 2>/dev/null | grep -qx "${cluster_name}"; then
+        echo "ERROR: Kind cluster '${cluster_name}' not found. Did you run hack/setup-karmada.sh?"
+        exit 1
+    fi
+
+    local attempt=1
+    local max_attempts=3
+    while [ "${attempt}" -le "${max_attempts}" ]; do
+        if kind load docker-image "${image}" --name "${cluster_name}"; then
+            return 0
+        fi
+        echo "WARN: Failed to load image '${image}' into Kind '${cluster_name}' (attempt ${attempt}/${max_attempts})"
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+
+    echo "ERROR: Unable to load image '${image}' into Kind cluster '${cluster_name}'."
+    echo "ERROR: Check that the image exists locally and the Kind cluster is running."
+    exit 1
+}
+
 echo "=== Deploying Volcano-Global ==="
 echo "Image tag: ${TAG}"
 echo "Controller image: ${CONTROLLER_MANAGER_IMAGE}"
@@ -63,8 +88,8 @@ fi
 
 # Step 2: Load images into the karmada-host Kind cluster
 echo "Loading images into Kind cluster ${KARMADA_HOST_CLUSTER}..."
-kind load docker-image "${CONTROLLER_MANAGER_IMAGE}" --name "${KARMADA_HOST_CLUSTER}" 2>/dev/null || true
-kind load docker-image "${WEBHOOK_MANAGER_IMAGE}" --name "${KARMADA_HOST_CLUSTER}" 2>/dev/null || true
+kind_load_image "${CONTROLLER_MANAGER_IMAGE}" "${KARMADA_HOST_CLUSTER}"
+kind_load_image "${WEBHOOK_MANAGER_IMAGE}" "${KARMADA_HOST_CLUSTER}"
 
 export KUBECONFIG="${KARMADA_KUBECONFIG}"
 ensure_context "${KARMADA_HOST_CLUSTER}"
@@ -87,18 +112,12 @@ ensure_exists "${KARMADA_HOST_CLUSTER}" -n karmada-system get secret karmada-web
 echo "Applying CRDs to Karmada API server..."
 kubectl --context karmada-apiserver apply -f docs/deploy/training.volcano.sh_hyperjobs.yaml
 kubectl --context karmada-apiserver apply -f \
-    "https://github.com/volcano-sh/volcano/raw/${VOLCANO_VERSION}/installer/helm/chart/volcano/crd/bases/batch.volcano.sh_jobs.yaml"
+    "https://raw.githubusercontent.com/volcano-sh/volcano/${VOLCANO_VERSION}/installer/helm/chart/volcano/crd/bases/batch.volcano.sh_jobs.yaml"
 kubectl --context karmada-apiserver apply -f \
-    "https://github.com/volcano-sh/volcano/raw/${VOLCANO_VERSION}/installer/helm/chart/volcano/crd/bases/scheduling.volcano.sh_queues.yaml"
+    "https://raw.githubusercontent.com/volcano-sh/volcano/${VOLCANO_VERSION}/installer/helm/chart/volcano/crd/bases/scheduling.volcano.sh_queues.yaml"
 ensure_exists "karmada-apiserver" get crd hyperjobs.training.volcano.sh
 ensure_exists "karmada-apiserver" get crd jobs.batch.volcano.sh
 ensure_exists "karmada-apiserver" get crd queues.scheduling.volcano.sh
-
-# Apply DataDependency CRDs if present
-if [ -d "docs/deploy/crds" ]; then
-    echo "Applying DataDependency CRDs..."
-    kubectl --context karmada-apiserver apply -f docs/deploy/crds/
-fi
 
 # Step 5: Deploy volcano-global controller and webhook manager
 echo "Creating volcano-global namespace..."
