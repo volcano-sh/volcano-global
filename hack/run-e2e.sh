@@ -60,6 +60,7 @@ export KUBECONFIG="${KARMADA_KUBECONFIG}"
 kubectl --context karmada-apiserver get ns default >/dev/null
 
 set +e
+GOOS=$(go env GOHOSTOS) GOARCH=$(go env GOHOSTARCH) CGO_ENABLED=1 \
 ginkgo -v --race --trace --fail-fast -p --randomize-all \
     ${GINKGO_FLAGS} \
     "${REPO_ROOT}/test/e2e/..." \
