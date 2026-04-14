@@ -119,6 +119,13 @@ ensure_exists "karmada-apiserver" get crd hyperjobs.training.volcano.sh
 ensure_exists "karmada-apiserver" get crd jobs.batch.volcano.sh
 ensure_exists "karmada-apiserver" get crd queues.scheduling.volcano.sh
 
+# Apply DataDependency CRDs when present (required by datadependency e2e suite).
+if [ -d "docs/deploy/crds" ]; then
+    echo "Applying DataDependency CRDs..."
+    kubectl --context karmada-apiserver apply -f docs/deploy/crds/
+fi
+
+
 # Step 5: Deploy volcano-global controller and webhook manager
 echo "Creating volcano-global namespace..."
 kubectl --context karmada-apiserver apply -f docs/deploy/volcano-global-namespace.yaml

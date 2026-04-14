@@ -78,6 +78,9 @@ images:
 unit-test:
 	go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
 
+e2e-test:
+	./hack/e2e.sh
+
 clean:
 	rm -rf _output/
 	rm -f *.log
