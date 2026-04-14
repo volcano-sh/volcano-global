@@ -48,7 +48,7 @@ type Clients struct {
 }
 
 // NewClients creates all required clients for e2e testing.
-func NewClients(karmadaKubeconfig, karmadaContext, memberKubeconfig string) (*Clients, error) {
+func NewClients(karmadaKubeconfig, karmadaContext, memberKubeconfig string, memberClusters []string) (*Clients, error) {
 	karmadaConfig, err := buildConfig(karmadaKubeconfig, karmadaContext)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build karmada config: %v", err)
@@ -82,7 +82,6 @@ func NewClients(karmadaKubeconfig, karmadaContext, memberKubeconfig string) (*Cl
 	memberClients := make(map[string]kubernetes.Interface)
 	memberVolcanoClients := make(map[string]volcanoclient.Interface)
 
-	memberClusters := []string{"member1", "member2", "member3"}
 	for _, cluster := range memberClusters {
 		memberConfig, err := buildConfig(memberKubeconfig, cluster)
 		if err != nil {

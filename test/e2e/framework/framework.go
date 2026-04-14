@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -44,6 +45,7 @@ var (
 	karmadaCtx        = "karmada-apiserver"
 	karmadaKubeconfig = os.Getenv("HOME") + "/.kube/karmada.config"
 	memberKubeconfig  = os.Getenv("HOME") + "/.kube/members.config"
+	memberClustersCSV = "member1,member2,member3"
 )
 
 func init() {
@@ -53,13 +55,20 @@ func init() {
 		"Path to the kubeconfig file for the Karmada control plane")
 	flag.StringVar(&memberKubeconfig, "member-kubeconfig", memberKubeconfig,
 		"Path to the kubeconfig file for the member clusters")
+	flag.StringVar(&memberClustersCSV, "member-clusters", memberClustersCSV,
+		"Comma-separated member cluster context names in member kubeconfig")
 }
 
 var _ = ginkgo.BeforeSuite(func() {
 	var err error
 	klog.Infof("Initializing e2e test clients...")
 
-	TestClients, err = NewClients(karmadaKubeconfig, karmadaCtx, memberKubeconfig)
+	TestClients, err = NewClients(
+		karmadaKubeconfig,
+		karmadaCtx,
+		memberKubeconfig,
+		parseMemberClusters(memberClustersCSV),
+	)
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Failed to initialize test clients")
 
 	klog.Infof("E2E test clients initialized successfully")
@@ -93,4 +102,18 @@ func DeleteNamespace(name string) {
 		return
 	}
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Failed to delete namespace %s", name)
+}
+
+func parseMemberClusters(csv string) []string {
+	var clusters []string
+	for _, item := range strings.Split(csv, ",") {
+		name := strings.TrimSpace(item)
+		if name != "" {
+			clusters = append(clusters, name)
+		}
+	}
+	if len(clusters) == 0 {
+		return []string{"member1", "member2", "member3"}
+	}
+	return clusters
 }
