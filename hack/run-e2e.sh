@@ -22,6 +22,7 @@ REPO_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 KARMADA_KUBECONFIG=${KARMADA_KUBECONFIG:-"${HOME}/.kube/karmada.config"}
 MEMBERS_KUBECONFIG=${MEMBERS_KUBECONFIG:-"${HOME}/.kube/members.config"}
 KARMADA_HOST_CLUSTER=${KARMADA_HOST_CLUSTER:-"karmada-host"}
+MEMBER_CLUSTERS=${MEMBER_CLUSTERS:-"member1 member2 member3"}
 ARTIFACTS_PATH=${ARTIFACTS_PATH:-"${REPO_ROOT}/volcano-global-e2e-logs"}
 GINKGO_FLAGS=${GINKGO_FLAGS:-""}
 
@@ -76,7 +77,7 @@ echo "Collecting logs to ${ARTIFACTS_PATH}..."
 cp "${KARMADA_KUBECONFIG}" "${ARTIFACTS_PATH}/" 2>/dev/null || true
 
 echo "Collecting Kind cluster logs..."
-for cluster in "${KARMADA_HOST_CLUSTER}" member1 member2 member3; do
+for cluster in "${KARMADA_HOST_CLUSTER}" ${MEMBER_CLUSTERS}; do
     CLUSTER_LOG_DIR="${ARTIFACTS_PATH}/${cluster}"
     mkdir -p "${CLUSTER_LOG_DIR}"
     kind export logs --name="${cluster}" "${CLUSTER_LOG_DIR}" 2>/dev/null || true
