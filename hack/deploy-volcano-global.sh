@@ -26,6 +26,7 @@ IMAGE_PREFIX=${IMAGE_PREFIX:-"volcanosh"}
 KARMADA_KUBECONFIG=${KARMADA_KUBECONFIG:-"${HOME}/.kube/karmada.config"}
 KARMADA_HOST_CLUSTER=${KARMADA_HOST_CLUSTER:-"karmada-host"}
 VOLCANO_VERSION=${VOLCANO_VERSION:-"release-1.14"}
+REFLECTOR_VERSION=${REFLECTOR_VERSION:-"v7.1.262"}
 SKIP_BUILD=${SKIP_BUILD:-"false"}
 
 CONTROLLER_MANAGER_IMAGE="${IMAGE_PREFIX}/volcano-global-controller-manager:${TAG}"
@@ -98,7 +99,7 @@ ensure_context "karmada-apiserver"
 # Step 3: Deploy Kubernetes Reflector to share kubeconfig secret
 echo "Deploying Kubernetes Reflector..."
 kubectl --context "${KARMADA_HOST_CLUSTER}" -n kube-system apply -f \
-    https://github.com/emberstack/kubernetes-reflector/releases/download/v7.1.262/reflector.yaml
+    "https://github.com/emberstack/kubernetes-reflector/releases/download/${REFLECTOR_VERSION}/reflector.yaml"
 
 echo "Annotating karmada-webhook-config secret for reflection..."
 kubectl --context "${KARMADA_HOST_CLUSTER}" annotate secret karmada-webhook-config \
