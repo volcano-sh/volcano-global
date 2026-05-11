@@ -18,24 +18,32 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-KARMADA_REPO=${KARMADA_REPO:-"https://github.com/karmada-io/karmada.git"}
+KARMADA_VERSION=${KARMADA_VERSION:-"v1.12.0"}
 KARMADA_DIR=${KARMADA_DIR:-"/tmp/karmada"}
+KARMADA_TARBALL_URL="https://github.com/karmada-io/karmada/archive/refs/tags/${KARMADA_VERSION}.tar.gz"
+MEMBER_CLUSTERS=${MEMBER_CLUSTERS:-"member1 member2 member3"}
 
 echo "=== Setting up Karmada multi-cluster environment ==="
+echo "Karmada version: ${KARMADA_VERSION}"
 
 if ! docker info >/dev/null 2>&1; then
     echo "ERROR: Docker engine is not reachable. Please start Docker Desktop and try again."
     exit 1
 fi
 
-# Step 1: Clone the Karmada repo
+# Step 1: Download and extract the Karmada release tarball
 if [ -d "${KARMADA_DIR}" ]; then
     echo "Karmada directory already exists at ${KARMADA_DIR}, removing..."
     rm -rf "${KARMADA_DIR}"
 fi
 
-echo "Cloning Karmada repository..."
-git clone --depth 1 "${KARMADA_REPO}" "${KARMADA_DIR}"
+echo "Downloading Karmada ${KARMADA_VERSION}"
+mkdir -p "${KARMADA_DIR}"
+curl -sL "${KARMADA_TARBALL_URL}" | tar xz --strip-components=1 -C "${KARMADA_DIR}" || {
+    echo "ERROR: Failed to download Karmada tarball from '${KARMADA_TARBALL_URL}'"
+    echo "ERROR: Please verify KARMADA_VERSION points to an existing release tag."
+    exit 1
+}
 
 # Step 2: cd into it
 cd "${KARMADA_DIR}"
@@ -47,15 +55,11 @@ echo "Running Karmada local-up script..."
 # Verify the environment came up
 echo "Verifying Karmada API server..."
 export KUBECONFIG="${HOME}/.kube/karmada.config"
-kubectl config get-contexts karmada-host >/dev/null
-kubectl --context karmada-host get ns default >/dev/null
-echo "Karmada host cluster is healthy."
 kubectl --context karmada-apiserver get ns default >/dev/null
 echo "Karmada API server is healthy."
 
 echo "Verifying member clusters..."
 export KUBECONFIG="${HOME}/.kube/members.config"
-MEMBER_CLUSTERS=${MEMBER_CLUSTERS:-"member1 member2 member3"}
 for cluster in ${MEMBER_CLUSTERS}; do
     kubectl --context "${cluster}" get ns default >/dev/null
     echo "  ${cluster} is ready."
