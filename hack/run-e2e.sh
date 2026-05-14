@@ -44,7 +44,7 @@ echo "Artifacts path: ${ARTIFACTS_PATH}"
 
 # Install ginkgo
 echo "Installing ginkgo..."
-GO111MODULE=on go install github.com/onsi/ginkgo/v2/ginkgo@latest
+GO111MODULE=on go install github.com/onsi/ginkgo/v2/ginkgo@v2.28.3
 
 GO_BIN="$(go env GOBIN)"
 if [ -z "${GO_BIN}" ]; then
@@ -74,7 +74,6 @@ set -e
 
 # Collect logs
 echo "Collecting logs to ${ARTIFACTS_PATH}..."
-cp "${KARMADA_KUBECONFIG}" "${ARTIFACTS_PATH}/" 2>/dev/null || true
 
 echo "Collecting Kind cluster logs..."
 for cluster in "${KARMADA_HOST_CLUSTER}" ${MEMBER_CLUSTERS}; do

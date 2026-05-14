@@ -104,6 +104,9 @@ func DeleteNamespace(name string) {
 	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Failed to delete namespace %s", name)
 }
 
+// BoolPtr returns a pointer to a bool value.
+func BoolPtr(b bool) *bool { return &b }
+
 func parseMemberClusters(csv string) []string {
 	var clusters []string
 	for _, item := range strings.Split(csv, ",") {
