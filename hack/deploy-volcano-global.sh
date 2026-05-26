@@ -150,6 +150,13 @@ echo "Deploying volcano-global controller-manager..."
 sed "s|image: .*volcano-global-controller-manager:.*|image: ${CONTROLLER_MANAGER_IMAGE}|" \
     docs/deploy/volcano-global-controller-manager.yaml | \
     sed "s|imagePullPolicy: .*|imagePullPolicy: IfNotPresent|" | \
+    awk '/^[[:space:]]*- --controllers=dispatcher$/{
+        sub(/- --controllers=dispatcher/, "- --controllers=dispatcher,reconciler,datadependency-controller")
+        print
+        print "            - --reconcilers=hyperjob"
+        print "            - --feature-gates=DataDependencyAwareness=true"
+        next
+    } {print}' | \
     kubectl --context "${KARMADA_HOST_CLUSTER}" apply -f -
 
 echo "Deploying volcano-global webhook-manager..."
