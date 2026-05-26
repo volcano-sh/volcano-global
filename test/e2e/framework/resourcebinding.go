@@ -18,6 +18,7 @@ package framework
 
 import (
 	"context"
+	"time"
 
 	"github.com/onsi/gomega"
 	workv1alpha2 "github.com/karmada-io/karmada/pkg/apis/work/v1alpha2"
@@ -48,6 +49,30 @@ func WaitForResourceBindingUnsuspended(namespace, name string) {
 		return !isSchedulingSuspended(rb)
 	}, PollTimeout, PollInterval).Should(gomega.BeTrue(),
 		"ResourceBinding %s/%s was not unsuspended by dispatcher", namespace, name)
+}
+
+// ConsistentlyResourceBindingSuspended asserts the ResourceBinding remains suspended for the given duration.
+// Used to verify the dispatcher honors capacity/priority constraints (e.g. a low-priority RB stays suspended
+// while a higher-priority RB consumes the available capacity).
+func ConsistentlyResourceBindingSuspended(namespace, name string, duration time.Duration) {
+	gomega.Consistently(func() bool {
+		rb, err := TestClients.KarmadaClient.WorkV1alpha2().ResourceBindings(namespace).Get(
+			context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		return isSchedulingSuspended(rb)
+	}, duration, PollInterval).Should(gomega.BeTrue(),
+		"ResourceBinding %s/%s should have remained suspended", namespace, name)
+}
+
+// GetResourceBinding fetches the current state of a ResourceBinding.
+func GetResourceBinding(namespace, name string) *workv1alpha2.ResourceBinding {
+	rb, err := TestClients.KarmadaClient.WorkV1alpha2().ResourceBindings(namespace).Get(
+		context.TODO(), name, metav1.GetOptions{})
+	gomega.Expect(err).ShouldNot(gomega.HaveOccurred(),
+		"Failed to get ResourceBinding %s/%s", namespace, name)
+	return rb
 }
 
 // WaitForResourceBindingHasAnnotation waits until a ResourceBinding has a specific annotation.

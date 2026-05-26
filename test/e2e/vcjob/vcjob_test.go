@@ -115,14 +115,17 @@ var _ = ginkgo.Describe("Cross-Cluster VCJob Scheduling", func() {
 		rb := framework.FindResourceBindingByWorkload(ns, "batch.volcano.sh/v1alpha1", "Job", job.Name)
 		gomega.Expect(rb).ToNot(gomega.BeNil())
 
-		// Verify webhook suspend / dispatcher unsuspend flow if the webhook is active.
-		suspendFailures := gomega.InterceptGomegaFailures(func() {
-			framework.WaitForResourceBindingSuspended(rb.Namespace, rb.Name)
-		})
-		if len(suspendFailures) == 0 {
-			framework.WaitForResourceBindingUnsuspended(rb.Namespace, rb.Name)
-		} else {
-			ginkgo.GinkgoWriter.Println("ResourceBinding was not suspended by webhook within timeout; continuing with RB existence smoke check.")
-		}
+		ginkgo.By("Verifying the webhook suspends the ResourceBinding")
+		framework.WaitForResourceBindingSuspended(rb.Namespace, rb.Name)
+
+		ginkgo.By("Verifying the dispatcher unsuspends the ResourceBinding")
+		framework.WaitForResourceBindingUnsuspended(rb.Namespace, rb.Name)
+
+		ginkgo.By("Verifying the VCJob is dispatched to a member cluster")
+		rb = framework.GetResourceBinding(rb.Namespace, rb.Name)
+		gomega.Expect(rb.Spec.Clusters).ShouldNot(gomega.BeEmpty(),
+			"ResourceBinding has no scheduled clusters after unsuspend")
+		targetCluster := rb.Spec.Clusters[0].Name
+		framework.WaitForVCJobOnMember(targetCluster, ns, job.Name)
 	})
 })

@@ -39,7 +39,7 @@ var _ = ginkgo.Describe("Data Dependency Aware Scheduling", func() {
 		framework.DeleteNamespace(ns)
 	})
 
-	ginkgo.It("should bind DataSourceClaim and inject placement annotation on ResourceBinding", func() {
+	ginkgo.It("should reconcile DataSourceClaim phase via the DataDependency controller", func() {
 		ds := &datav1alpha1.DataSource{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "e2e-ds",

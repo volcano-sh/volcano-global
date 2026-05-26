@@ -17,9 +17,13 @@ limitations under the License.
 package quota
 
 import (
+	"context"
+	"time"
+
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	batchv1alpha1 "volcano.sh/apis/pkg/apis/batch/v1alpha1"
@@ -95,19 +99,25 @@ var _ = ginkgo.Describe("Resource Quota and Priority", func() {
 			framework.CreatePropagationPolicy(pp)
 			defer framework.DeletePropagationPolicy(ns, pp.Name)
 
-			ginkgo.By("Verifying ResourceBinding is created")
+			ginkgo.By("Verifying ResourceBinding is created and unsuspended by the dispatcher")
 			rb := framework.FindResourceBindingByWorkload(ns, "batch.volcano.sh/v1alpha1", "Job", job.Name)
 			gomega.Expect(rb).ShouldNot(gomega.BeNil())
-
-			unsuspendFailures := gomega.InterceptGomegaFailures(func() {
-				framework.WaitForResourceBindingUnsuspended(rb.Namespace, rb.Name)
-			})
-			if len(unsuspendFailures) > 0 {
-				ginkgo.GinkgoWriter.Println("ResourceBinding was not unsuspended within timeout; continuing with RB existence smoke check.")
-			}
+			framework.WaitForResourceBindingUnsuspended(rb.Namespace, rb.Name)
 		})
 
-		ginkgo.It("should dispatch higher priority VCJob before lower priority", func() {
+		ginkgo.It("should dispatch higher priority VCJob before lower priority when capacity is constrained", func() {
+			ginkgo.By("Creating a high-priority PriorityClass")
+			pc := &schedulingv1.PriorityClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "e2e-high-priority-" + ns},
+				Value:      1000,
+			}
+			_, err := framework.TestClients.KubeClient.SchedulingV1().PriorityClasses().Create(
+				context.TODO(), pc, metav1.CreateOptions{})
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "Failed to create PriorityClass")
+			defer framework.TestClients.KubeClient.SchedulingV1().PriorityClasses().Delete(
+				context.TODO(), pc.Name, metav1.DeleteOptions{})
+
+			ginkgo.By("Creating a queue whose capacity fits only one job at a time")
 			queueName := "e2e-priority-" + ns
 			queue := &schedulingv1beta1.Queue{
 				ObjectMeta: metav1.ObjectMeta{
@@ -117,7 +127,7 @@ var _ = ginkgo.Describe("Resource Quota and Priority", func() {
 					Reclaimable: framework.BoolPtr(true),
 					Weight:      1,
 					Capability: corev1.ResourceList{
-						corev1.ResourceCPU: resource.MustParse("2"),
+						corev1.ResourceCPU: resource.MustParse("100m"),
 					},
 				},
 			}
@@ -126,7 +136,7 @@ var _ = ginkgo.Describe("Resource Quota and Priority", func() {
 			defer framework.DeleteQueue(queueName)
 			framework.WaitForQueueOpen(queueName)
 
-			ginkgo.By("Creating a low priority VCJob")
+			ginkgo.By("Submitting a low-priority VCJob first")
 			lowJob := newTestVCJob(ns, "low-priority", queueName, 1)
 			lowPP := newTestPropagationPolicy(ns, lowJob.Name)
 			framework.CreateVCJob(lowJob)
@@ -134,20 +144,23 @@ var _ = ginkgo.Describe("Resource Quota and Priority", func() {
 			framework.CreatePropagationPolicy(lowPP)
 			defer framework.DeletePropagationPolicy(ns, lowPP.Name)
 
-			ginkgo.By("Creating a high priority VCJob")
+			ginkgo.By("Submitting a high-priority VCJob that should preempt the dispatch order")
 			highJob := newTestVCJob(ns, "high-priority", queueName, 1)
-			highJob.Spec.PriorityClassName = "high-priority"
+			highJob.Spec.PriorityClassName = pc.Name
 			highPP := newTestPropagationPolicy(ns, highJob.Name)
 			framework.CreateVCJob(highJob)
 			defer framework.DeleteVCJob(ns, highJob.Name)
 			framework.CreatePropagationPolicy(highPP)
 			defer framework.DeletePropagationPolicy(ns, highPP.Name)
 
-			ginkgo.By("Verifying both jobs get ResourceBindings")
 			rbLow := framework.FindResourceBindingByWorkload(ns, "batch.volcano.sh/v1alpha1", "Job", lowJob.Name)
-			gomega.Expect(rbLow).ShouldNot(gomega.BeNil())
 			rbHigh := framework.FindResourceBindingByWorkload(ns, "batch.volcano.sh/v1alpha1", "Job", highJob.Name)
-			gomega.Expect(rbHigh).ShouldNot(gomega.BeNil())
+
+			ginkgo.By("Verifying the high-priority ResourceBinding is unsuspended first")
+			framework.WaitForResourceBindingUnsuspended(rbHigh.Namespace, rbHigh.Name)
+
+			ginkgo.By("Verifying the low-priority ResourceBinding stays suspended while capacity is consumed")
+			framework.ConsistentlyResourceBindingSuspended(rbLow.Namespace, rbLow.Name, 10*time.Second)
 		})
 	})
 })
