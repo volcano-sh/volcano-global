@@ -23,10 +23,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	batchv1alpha1 "volcano.sh/apis/pkg/apis/batch/v1alpha1"
+	schedulingv1beta1 "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
 	trainingv1alpha1 "volcano.sh/apis/pkg/apis/training/v1alpha1"
 
 	"volcano.sh/volcano-global/test/e2e/framework"
 )
+
+const hyperJobTestQueue = "hyperjob-e2e"
 
 var _ = ginkgo.Describe("HyperJob Scheduling", func() {
 	var ns string
@@ -34,10 +37,18 @@ var _ = ginkgo.Describe("HyperJob Scheduling", func() {
 	ginkgo.BeforeEach(func() {
 		ns = framework.RandomNamespace("hyperjob-e2e")
 		framework.CreateNamespace(ns)
+
+		framework.CreateQueue(&schedulingv1beta1.Queue{
+			ObjectMeta: metav1.ObjectMeta{Name: hyperJobTestQueue},
+			Spec:       schedulingv1beta1.QueueSpec{Weight: 1},
+		})
+		framework.WaitForQueueOpen(hyperJobTestQueue)
+		framework.WaitForQueueOnMember("member1", hyperJobTestQueue)
 	})
 
 	ginkgo.AfterEach(func() {
 		framework.DeleteNamespace(ns)
+		framework.DeleteQueue(hyperJobTestQueue)
 	})
 
 	ginkgo.It("should create child VCJobs and PropagationPolicies from HyperJob", func() {
@@ -53,7 +64,7 @@ var _ = ginkgo.Describe("HyperJob Scheduling", func() {
 						Replicas:     2,
 						ClusterNames: []string{"member1"},
 						TemplateSpec: batchv1alpha1.JobSpec{
-							Queue: "test",
+							Queue: hyperJobTestQueue,
 							Tasks: []batchv1alpha1.TaskSpec{{
 								Name:     "worker",
 								Replicas: 1,
