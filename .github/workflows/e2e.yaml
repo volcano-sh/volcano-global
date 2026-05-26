@@ -67,9 +67,23 @@ jobs:
         run: |
           ./hack/setup-volcano.sh
 
+      - name: Build volcano-global images
+        run: |
+          TAG=$(git rev-parse --verify HEAD 2>/dev/null || echo "latest")
+          # The Dockerfiles hardcode golang:1.24 which does not satisfy the
+          # effective module-graph minimum of Go >= 1.25 (k8s.io v0.34.x).
+          # Stream a sed-patched Dockerfile to docker build via stdin so we
+          # can use golang:1.25 without modifying main-codebase files.
+          for name in controller-manager webhook-manager; do
+            sed 's|FROM golang:[0-9][0-9.]* AS builder|FROM golang:1.25 AS builder|' \
+                "installer/dockerfile/${name}/Dockerfile" | \
+            docker build -t "volcanosh/volcano-global-${name}:${TAG}" -f - .
+          done
+          echo "BUILD_TAG=${TAG}" >> "${GITHUB_ENV}"
+
       - name: Deploy Volcano-Global
         run: |
-          ./hack/deploy-volcano-global.sh
+          SKIP_BUILD=true TAG="${BUILD_TAG}" ./hack/deploy-volcano-global.sh
 
       - name: Run e2e tests
         run: |
