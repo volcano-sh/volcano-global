@@ -17,9 +17,6 @@ limitations under the License.
 package hyperjob
 
 import (
-	"context"
-	"time"
-
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -89,24 +86,7 @@ var _ = ginkgo.Describe("HyperJob Scheduling", func() {
 		gomega.Expect(got).ToNot(gomega.BeNil())
 		gomega.Expect(got.Spec.ReplicatedJobs).To(gomega.HaveLen(1))
 
-		// If the HyperJob controller is active, child VCJobs should appear.
-		failures := gomega.InterceptGomegaFailures(func() {
-			gomega.Eventually(func() int {
-				jobs, err := framework.TestClients.VolcanoClient.BatchV1alpha1().Jobs(ns).List(
-					context.TODO(), metav1.ListOptions{
-						LabelSelector: "volcano.sh/hyperjob-name=" + hyperjob.Name,
-					})
-				if err != nil {
-					return 0
-				}
-				return len(jobs.Items)
-			}, 30*time.Second, framework.PollInterval).Should(gomega.BeNumerically(">", 0))
-		})
-		if len(failures) == 0 {
-			framework.WaitForHyperJobChildVCJobs(ns, hyperjob.Name, 2)
-			framework.WaitForHyperJobChildPPs(ns, hyperjob.Name, 2)
-		} else {
-			ginkgo.GinkgoWriter.Println("HyperJob controller did not create child VCJobs within 30s; continuing with CRUD smoke check.")
-		}
+		framework.WaitForHyperJobChildVCJobs(ns, hyperjob.Name, 2)
+		framework.WaitForHyperJobChildPPs(ns, hyperjob.Name, 2)
 	})
 })

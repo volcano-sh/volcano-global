@@ -18,7 +18,6 @@ package datadependency
 
 import (
 	"context"
-	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -88,27 +87,16 @@ var _ = ginkgo.Describe("Data Dependency Aware Scheduling", func() {
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		gomega.Expect(got.Spec.DataSourceName).To(gomega.Equal("db.table"))
 
-		// If the DataDependency controller is active, it should update claim status.
-		failures := gomega.InterceptGomegaFailures(func() {
-			gomega.Eventually(func() string {
-				cur, getErr := framework.TestClients.VolcanoClient.DatadependencyV1alpha1().DataSourceClaims(ns).Get(
-					context.TODO(), claim.Name, metav1.GetOptions{})
-				if getErr != nil {
-					return ""
-				}
-				return string(cur.Status.Phase)
-			}, 30*time.Second, framework.PollInterval).ShouldNot(gomega.BeEmpty())
-		})
-		if len(failures) == 0 {
+		gomega.Eventually(func() string {
 			cur, getErr := framework.TestClients.VolcanoClient.DatadependencyV1alpha1().DataSourceClaims(ns).Get(
 				context.TODO(), claim.Name, metav1.GetOptions{})
-			gomega.Expect(getErr).ToNot(gomega.HaveOccurred())
-			gomega.Expect(string(cur.Status.Phase)).To(gomega.Or(
-				gomega.Equal(string(datav1alpha1.DSCPhaseBound)),
-				gomega.Equal(string(datav1alpha1.DSCPhasePending)),
-			))
-		} else {
-			ginkgo.GinkgoWriter.Println("DataSourceClaim status was not updated within 30s; continuing with CRUD smoke check.")
-		}
+			if getErr != nil {
+				return ""
+			}
+			return string(cur.Status.Phase)
+		}, framework.PollTimeout, framework.PollInterval).Should(gomega.Or(
+			gomega.Equal(string(datav1alpha1.DSCPhaseBound)),
+			gomega.Equal(string(datav1alpha1.DSCPhasePending)),
+		), "DataDependency controller should set DataSourceClaim status to Bound or Pending")
 	})
 })
