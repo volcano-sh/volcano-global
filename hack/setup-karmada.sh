@@ -49,6 +49,9 @@ curl -sL "${KARMADA_TARBALL_URL}" | tar xz --strip-components=1 -C "${KARMADA_DI
 cd "${KARMADA_DIR}"
 
 # Step 3: Deploy the Karmada environment
+# Disable Go VCS stamping: the tarball has no .git directory, so `go build`
+# would otherwise fail with "error obtaining VCS status: exit status 128".
+export GOFLAGS="${GOFLAGS:-} -buildvcs=false"
 echo "Running Karmada local-up script..."
 ./hack/local-up-karmada.sh
 
