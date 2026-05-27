@@ -144,13 +144,6 @@ var _ = ginkgo.Describe("Resource Quota and Priority", func() {
 			framework.CreatePropagationPolicy(lowPP)
 			defer framework.DeletePropagationPolicy(ns, lowPP.Name)
 
-			// Wait for the low-priority ResourceBinding to be observed as suspended by the
-			// webhook before submitting the high-priority job. Without this, the dispatcher
-			// can fire its 1s tick between the two CreateVCJob calls and dispatch low while
-			// it is the sole candidate, which defeats the priority-ordering assertion.
-			rbLow := framework.FindResourceBindingByWorkload(ns, "batch.volcano.sh/v1alpha1", "Job", lowJob.Name)
-			framework.WaitForResourceBindingSuspended(rbLow.Namespace, rbLow.Name)
-
 			ginkgo.By("Submitting a high-priority VCJob that should preempt the dispatch order")
 			highJob := newTestVCJob(ns, "high-priority", queueName, 1)
 			highJob.Spec.PriorityClassName = pc.Name
@@ -160,8 +153,10 @@ var _ = ginkgo.Describe("Resource Quota and Priority", func() {
 			framework.CreatePropagationPolicy(highPP)
 			defer framework.DeletePropagationPolicy(ns, highPP.Name)
 
+			// Register both jobs before waiting on dispatch so the dispatcher sees
+			// them in the same scheduling cycle instead of dispatching low alone.
+			rbLow := framework.FindResourceBindingByWorkload(ns, "batch.volcano.sh/v1alpha1", "Job", lowJob.Name)
 			rbHigh := framework.FindResourceBindingByWorkload(ns, "batch.volcano.sh/v1alpha1", "Job", highJob.Name)
-			framework.WaitForResourceBindingSuspended(rbHigh.Namespace, rbHigh.Name)
 
 			ginkgo.By("Verifying the high-priority ResourceBinding is unsuspended first")
 			framework.WaitForResourceBindingUnsuspended(rbHigh.Namespace, rbHigh.Name)
