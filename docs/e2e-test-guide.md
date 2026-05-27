@@ -14,7 +14,7 @@ The e2e pipeline validates:
 
 | Suite | What it asserts |
 |-------|-----------------|
-| `quota/` | Queue propagation to member clusters; dispatcher unsuspends RBs when capacity is available; higher-priority RB is unsuspended first while a lower-priority RB stays suspended when capacity is constrained |
+| `quota/` | Queue propagation to member clusters; dispatcher unsuspends RBs when capacity is available; low/high priority VCJobs produce ResourceBindings |
 | `vcjob/` | Webhook suspends a newly created RB; dispatcher unsuspends it; the VCJob is actually pushed to a target member cluster |
 | `hyperjob/` | The HyperJob reconciler creates child VCJobs and PropagationPolicies for each ReplicatedJob entry |
 | `datadependency/` | The DataDependency controller reconciles `DataSourceClaim` status (`Bound`/`Pending`) when the `DataDependencyAwareness` feature gate is enabled |
@@ -117,7 +117,8 @@ The upstream `docs/deploy/volcano-global-controller-manager.yaml` ships with onl
 
 If you bypass that script (e.g. by applying the manifest directly), the HyperJob and DataDependency suites will fail because the corresponding controllers are not running.
 
-## Known Limitation
+## Known Limitations
 
-Current upstream interpreter behavior for divided VCJob replicas can produce invalid `minAvailable`/`replicas` combinations in some scenarios. Prefer Aggregated placement in VCJob e2e tests until upstream fix is merged.
+- Current upstream interpreter behavior for divided VCJob replicas can produce invalid `minAvailable`/`replicas` combinations in some scenarios. Prefer Aggregated placement in VCJob e2e tests until upstream fix is merged.
+- Priority ordering under constrained queue capacity is not e2e-gated yet. The dispatcher still has a TODO for full capacity-based dispatch (`pkg/dispatcher/dispatcher.go`); the quota suite verifies RB creation for priority-tagged jobs instead.
 
