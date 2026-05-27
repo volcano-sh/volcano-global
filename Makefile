@@ -76,7 +76,10 @@ images:
 	done
 
 unit-test:
-	go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+	go test -v -race -coverprofile=coverage.txt -covermode=atomic $$(go list ./... | grep -v /test/e2e)
+
+e2e-test:
+	./hack/e2e.sh
 
 clean:
 	rm -rf _output/
