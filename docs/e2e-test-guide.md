@@ -121,4 +121,5 @@ If you bypass that script (e.g. by applying the manifest directly), the HyperJob
 
 - Current upstream interpreter behavior for divided VCJob replicas can produce invalid `minAvailable`/`replicas` combinations in some scenarios. Prefer Aggregated placement in VCJob e2e tests until upstream fix is merged.
 - Priority ordering under constrained queue capacity is not e2e-gated yet. The dispatcher still has a TODO for full capacity-based dispatch (`pkg/dispatcher/dispatcher.go`); the quota suite verifies RB creation for priority-tagged jobs instead.
+- The vcjob suite may miss the brief webhook-suspend window if the dispatcher unsuspends the ResourceBinding before the test observes it. The test still verifies unsuspend and member-cluster dispatch.
 

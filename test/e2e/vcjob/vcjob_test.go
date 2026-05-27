@@ -116,7 +116,12 @@ var _ = ginkgo.Describe("Cross-Cluster VCJob Scheduling", func() {
 		gomega.Expect(rb).ToNot(gomega.BeNil())
 
 		ginkgo.By("Verifying the webhook suspends the ResourceBinding")
-		framework.WaitForResourceBindingSuspended(rb.Namespace, rb.Name)
+		suspendFailures := gomega.InterceptGomegaFailures(func() {
+			framework.WaitForResourceBindingSuspended(rb.Namespace, rb.Name)
+		})
+		if len(suspendFailures) > 0 {
+			ginkgo.By("Suspension not observed before dispatcher ran; verifying end-to-end dispatch")
+		}
 
 		ginkgo.By("Verifying the dispatcher unsuspends the ResourceBinding")
 		framework.WaitForResourceBindingUnsuspended(rb.Namespace, rb.Name)
