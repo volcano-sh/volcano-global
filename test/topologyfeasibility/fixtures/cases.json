@@ -1,0 +1,30 @@
+{
+  "clusters": {
+    "fragmented": {
+      "nodes": [
+        {"name": "worker-0", "leaf": "leaf-0", "slots": 1},
+        {"name": "worker-1", "leaf": "leaf-0", "slots": 1},
+        {"name": "worker-2", "leaf": "leaf-1", "slots": 1},
+        {"name": "worker-3", "leaf": "leaf-1", "slots": 1}
+      ]
+    },
+    "feasible": {
+      "nodes": [
+        {"name": "worker-0", "leaf": "leaf-0", "slots": 1},
+        {"name": "worker-1", "leaf": "leaf-0", "slots": 1},
+        {"name": "worker-2", "leaf": "leaf-0", "slots": 1},
+        {"name": "worker-3", "leaf": "leaf-0", "slots": 1}
+      ]
+    }
+  },
+  "cases": [
+    {"id": "T01", "cluster": "fragmented", "mode": "none", "pods": 4, "wantFit": true},
+    {"id": "T02", "cluster": "fragmented", "mode": "hard", "highestTierAllowed": 1, "pods": 4, "wantFit": false},
+    {"id": "T03", "cluster": "feasible", "mode": "hard", "highestTierAllowed": 1, "pods": 4, "wantFit": true},
+    {"id": "T04", "cluster": "fragmented", "mode": "hard", "highestTierAllowed": 2, "pods": 4, "wantFit": true},
+    {"id": "T05", "cluster": "fragmented", "mode": "soft", "pods": 4, "wantFit": true},
+    {"id": "T06A", "cluster": "fragmented", "mode": "hard", "highestTierAllowed": 1, "pods": 2, "wantFit": true},
+    {"id": "T06B", "cluster": "feasible", "mode": "hard", "highestTierAllowed": 1, "pods": 2, "wantFit": true},
+    {"id": "T07", "cluster": "feasible", "mode": "hard", "highestTierAllowed": 1, "pods": 4, "excludedNodes": ["worker-3"], "wantFit": false}
+  ]
+}
